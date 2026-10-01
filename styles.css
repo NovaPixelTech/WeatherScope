@@ -491,8 +491,21 @@ body {
 }
 
 .autocomplete-item:hover,
-.autocomplete-item.selected {
+.autocomplete-item.selected,
+.autocomplete-item.active {
   background: rgba(2, 132, 199, 0.35);
+  box-shadow: inset 3px 0 0 var(--accent-cyan);
+}
+
+.autocomplete-hint {
+  padding: 8px 18px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: rgba(9, 16, 32, 0.9);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .autocomplete-item-name {
@@ -972,6 +985,41 @@ body {
   font-weight: 500;
 }
 
+.data-freshness {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+.refresh-btn {
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+
+.refresh-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.refresh-btn.is-loading svg {
+  animation: spin 0.9s linear infinite;
+}
+
+/* Fallback notice shown when JavaScript is unavailable */
+.noscript-warning {
+  margin: 16px auto;
+  max-width: 640px;
+  padding: 16px 20px;
+  border-radius: var(--radius-md);
+  background: rgba(13, 22, 41, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  font-weight: 600;
+  text-align: center;
+}
+
 .condition-badge {
   display: inline-flex;
   align-items: center;
@@ -1394,7 +1442,7 @@ body {
 
 .daily-row {
   display: grid;
-  grid-template-columns: 140px 48px 1fr 180px;
+  grid-template-columns: 140px 48px 1fr 132px 180px;
   align-items: center;
   gap: 16px;
   padding: 14px 20px;
@@ -1450,10 +1498,43 @@ body {
   white-space: nowrap;
 }
 
+/* Per-day UV max + precipitation chance */
+.daily-extra-col {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.daily-extra-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.daily-extra-item svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.daily-uv-item[data-uv-level="high"] {
+  color: #fbbf24;
+}
+
+.daily-uv-item[data-uv-level="very-high"],
+.daily-uv-item[data-uv-level="extreme"] {
+  color: #fb7185;
+}
+
 .daily-temp-bar-col {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .daily-min-temp {
@@ -1466,6 +1547,7 @@ body {
 
 .daily-bar-track {
   flex: 1;
+  min-width: 24px;
   height: 7px;
   background: rgba(255, 255, 255, 0.16);
   border-radius: var(--radius-full);
@@ -1583,11 +1665,11 @@ body {
    ========================================================================== */
 @media (max-width: 860px) {
   .daily-row {
-    grid-template-columns: 100px 36px 1fr 140px;
+    grid-template-columns: 100px 36px 1fr 100px 140px;
     gap: 10px;
     padding: 10px 14px;
   }
-  
+
   .climate-results-grid {
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   }
@@ -1622,9 +1704,22 @@ body {
   }
 
   .daily-row {
-    grid-template-columns: 80px 32px 1fr 110px;
+    /* Stack the flexible content vertically so the fixed columns can never
+       overflow the row on very narrow viewports (e.g. 320px). */
+    grid-template-columns: 68px 30px minmax(0, 1fr);
+    grid-template-areas:
+      "day icon condition"
+      "day icon temps"
+      "day icon extra";
+    row-gap: 6px;
     font-size: 0.85rem;
   }
+
+  .daily-day-col { grid-area: day; }
+  .daily-icon-col { grid-area: icon; }
+  .daily-condition-label { grid-area: condition; }
+  .daily-temp-bar-col { grid-area: temps; }
+  .daily-extra-col { grid-area: extra; }
 
   .daily-condition-label {
     display: none;
@@ -1641,5 +1736,23 @@ body {
   
   .climate-results-controls {
     justify-content: space-between;
+  }
+}
+
+/* ==========================================================================
+   Reduced Motion - respect user accessibility preferences
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .ambient-orb {
+    animation: none !important;
   }
 }

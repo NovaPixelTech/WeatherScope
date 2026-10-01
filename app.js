@@ -110,8 +110,28 @@
     activeClimateQuery: '',
     activeFilterTags: [],
     matchingCities: [],
+    resultCards: new Map(), // cityId -> { card, ...refs } for node reuse
     sortOrder: 'temp-desc',
+    // Race-condition guards
+    autocompleteSeq: 0,
+    autocompleteController: null,
+    weatherController: null,
+    // Active autocomplete options for keyboard navigation
+    activeOptionIndex: -1,
   };
+
+  const THEME_CLASSES = [
+    'theme-day-clear',
+    'theme-night-clear',
+    'theme-cloudy',
+    'theme-rainy',
+    'theme-thunderstorm',
+    'theme-snowy',
+  ];
+
+  const GLOBAL_CACHE_KEY = 'skycast_global_cache';
+  const GLOBAL_CACHE_TTL = 5 * 60 * 1000;
+  const REQUEST_TIMEOUT = 12000;
 
   // ==========================================================================
   // DOM Elements
@@ -123,6 +143,7 @@
     geoBtn: document.getElementById('geo-btn'),
     searchSubmitBtn: document.getElementById('search-submit-btn'),
     autocompleteList: document.getElementById('autocomplete-list'),
+    autocompleteOptions: [],
 
     // Search Mode Tabs
     tabModeCity: document.getElementById('tab-mode-city'),
@@ -195,6 +216,10 @@
     // Forecasts
     hourlyStrip: document.getElementById('hourly-strip'),
     dailyList: document.getElementById('daily-list'),
+
+    // Freshness + refresh
+    dataFreshness: document.getElementById('data-freshness'),
+    refreshBtn: document.getElementById('refresh-btn'),
   };
 
   // ==========================================================================
@@ -444,6 +469,11 @@
     return state.unit === 'fahrenheit' ? 'mph' : 'km/h';
   }
 
+  /** Format a wind threshold that is always stored internally in km/h. */
+  function formatWindThreshold(kmh) {
+    return state.unit === 'fahrenheit' ? Math.round(kmhToMph(kmh)) : Math.round(kmh);
+  }
+
   function formatPrecip(mm) {
     if (mm === null || mm === undefined || isNaN(mm)) return '0.0';
     if (state.unit === 'fahrenheit') {
@@ -454,6 +484,34 @@
 
   function getPrecipUnitSymbol() {
     return state.unit === 'fahrenheit' ? 'in' : 'mm';
+  }
+
+  // ==========================================================================
+  // Raw Unit Conversions (for normalising user-entered thresholds)
+  // ==========================================================================
+  function celsiusToFahrenheit(c) {
+    return (c * 9) / 5 + 32;
+  }
+
+  function fahrenheitToCelsius(f) {
+    return ((f - 32) * 5) / 9;
+  }
+
+  function kmhToMph(kmh) {
+    return kmh * 0.621371;
+  }
+
+  /**
+   * Interpret a temperature threshold typed by the user, returning Celsius.
+   * An explicit °C/°F marker always wins; otherwise the active display unit is
+   * assumed, so "> 75" means 75°F in Fahrenheit mode and 75°C in Celsius mode.
+   */
+  function normalizeEnteredTemp(value, text) {
+    const t = text || '';
+    if (/\d\s*°?\s*c\b/i.test(t)) return value;
+    if (/\d\s*°?\s*f\b/i.test(t)) return fahrenheitToCelsius(value);
+    if (state.unit === 'fahrenheit') return fahrenheitToCelsius(value);
+    return value;
   }
 
   function getWindCardinal(degrees) {
@@ -476,19 +534,74 @@
     return 'High humidity';
   }
 
-  // ==========================================================================
-  // API Calls
-  // ==========================================================================
-  async function searchCities(query) {
-    if (!query || query.trim().length < 2) return [];
-    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query.trim())}&count=6&language=en&format=json`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Geocoding search failed');
-    const data = await res.json();
-    return data.results || [];
+  /**
+   * Build a human-readable "updated N min ago" label.
+   * `current.time` is local to the requested location, so we treat it as UTC and
+   * subtract the location's offset to recover the true observation instant.
+   */
+  function formatFreshness(timeStr, utcOffsetSeconds) {
+    if (!timeStr) return null;
+    const parsed = Date.parse(`${timeStr}Z`);
+    if (Number.isNaN(parsed)) return null;
+
+    const instant = parsed - (utcOffsetSeconds || 0) * 1000;
+    const diffMin = Math.floor((Date.now() - instant) / 60000);
+
+    if (diffMin < 1) return 'Updated just now';
+    if (diffMin < 60) return `Updated ${diffMin} min ago`;
+    const hours = Math.floor(diffMin / 60);
+    if (hours < 24) return `Updated ${hours} hour${hours === 1 ? '' : 's'} ago`;
+    const days = Math.floor(hours / 24);
+    return `Updated ${days} day${days === 1 ? '' : 's'} ago`;
   }
 
-  async function fetchWeatherData(lat, lon, timezone = 'auto') {
+// ==========================================================================
+// API Calls
+// ==========================================================================
+  /**
+   * fetch + JSON with an enforced timeout.
+   * Throws an AbortError-compatible name so callers can ignore stale requests.
+   */
+  async function fetchJson(url, externalSignal) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
+    const relayAbort = () => controller.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      else externalSignal.addEventListener('abort', relayAbort, { once: true });
+    }
+
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+      return await res.json();
+    } catch (err) {
+      if (err && err.name === 'AbortError') {
+        const timeoutError = new Error('Request timed out or was superseded');
+        timeoutError.name = 'AbortError';
+        throw timeoutError;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+      if (externalSignal) externalSignal.removeEventListener('abort', relayAbort);
+    }
+  }
+
+  async function searchCities(query, signal) {
+    if (!query || query.trim().length < 2) return [];
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query.trim())}&count=6&language=en&format=json`;
+    try {
+      const data = await fetchJson(url, signal);
+      return data.results || [];
+    } catch (err) {
+      if (err.name !== 'AbortError') throw new Error('Geocoding search failed');
+      throw err;
+    }
+  }
+
+  async function fetchWeatherData(lat, lon, timezone = 'auto', signal) {
     const params = new URLSearchParams({
       latitude: lat,
       longitude: lon,
@@ -518,32 +631,36 @@
       timezone: timezone,
     });
 
-    const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
-    if (!res.ok) throw new Error('Weather forecast request failed');
-    return await res.json();
+    return await fetchJson(`https://api.open-meteo.com/v1/forecast?${params.toString()}`, signal);
   }
 
   /**
-   * Batch fetch current weather for all worldwide benchmark cities
-   * Cached for 5 minutes in memory to ensure sub-millisecond responses
+   * Batch fetch current weather for all worldwide benchmark cities.
+   * Cached in memory + sessionStorage for GLOBAL_CACHE_TTL so repeated climate
+   * queries and page reloads within a session are instant.
    */
   async function fetchGlobalCitiesWeather() {
     const now = Date.now();
-    if (state.globalWeatherData && now - state.globalCacheTimestamp < 5 * 60 * 1000) {
+    if (state.globalWeatherData && now - state.globalCacheTimestamp < GLOBAL_CACHE_TTL) {
       return state.globalWeatherData;
+    }
+
+    // Try the cross-reload session cache before hitting the network
+    const cached = readGlobalCache();
+    if (cached) {
+      state.globalWeatherData = cached;
+      state.globalCacheTimestamp = now;
+      return cached;
     }
 
     const lats = WORLD_CITIES.map((c) => c.latitude).join(',');
     const lons = WORLD_CITIES.map((c) => c.longitude).join(',');
 
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Global cities forecast batch query failed');
-    const rawList = await res.json();
-
+    const rawList = await fetchJson(url);
     const dataList = Array.isArray(rawList) ? rawList : [rawList];
 
-    state.globalWeatherData = WORLD_CITIES.map((city, idx) => {
+    const entries = WORLD_CITIES.map((city, idx) => {
       const forecast = dataList[idx] || {};
       return {
         city: city,
@@ -551,8 +668,35 @@
       };
     });
 
+    state.globalWeatherData = entries;
     state.globalCacheTimestamp = now;
-    return state.globalWeatherData;
+    writeGlobalCache(entries, now);
+    return entries;
+  }
+
+  function readGlobalCache() {
+    try {
+      const raw = sessionStorage.getItem(GLOBAL_CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !Array.isArray(parsed.entries) || !parsed.timestamp) return null;
+      if (Date.now() - parsed.timestamp >= GLOBAL_CACHE_TTL) return null;
+      // Re-attach the canonical city objects so identity checks stay stable
+      return parsed.entries.map((entry, idx) => ({
+        city: WORLD_CITIES[idx] || entry.city,
+        current: entry.current || {},
+      }));
+    } catch {
+      return null;
+    }
+  }
+
+  function writeGlobalCache(entries, timestamp) {
+    try {
+      sessionStorage.setItem(GLOBAL_CACHE_KEY, JSON.stringify({ timestamp, entries }));
+    } catch {
+      // sessionStorage may be unavailable (private mode / quota) - caching is optional
+    }
   }
 
   // ==========================================================================
@@ -571,6 +715,7 @@
     };
 
     const combined = `${queryStr || ''} ${presetTags.join(' ')}`.toLowerCase();
+    const unitSuffix = getTempUnitSymbol();
 
     // Check Weather Categories
     if (/sunny|clear|sun/i.test(combined)) {
@@ -594,53 +739,71 @@
       criteria.tokens.push('⚡ Storm');
     }
     if (/windy|breeze/i.test(combined)) {
+      // Thresholds are always stored in km/h (the API unit); 20 km/h ~= breezy
       criteria.minWind = 20;
-      criteria.tokens.push('💨 Windy (>20 km/h)');
+      criteria.tokens.push(`💨 Windy (>${formatWindThreshold(20)} ${getWindUnitSymbol()})`);
     }
 
-    // Check Temperature Descriptors
+    // Check Temperature Descriptors.
+    // NOTE: use ?? / explicit null checks so a legitimate threshold of 0 is
+    // never treated as "unset" (the previous `||` fallback broke e.g. "< 0 freezing").
+    const raiseMin = (value) => {
+      criteria.tempMin = criteria.tempMin === null ? value : Math.max(criteria.tempMin, value);
+    };
+    const lowerMax = (value) => {
+      criteria.tempMax = criteria.tempMax === null ? value : Math.min(criteria.tempMax, value);
+    };
+
     if (/hot/i.test(combined)) {
-      criteria.tempMin = Math.max(criteria.tempMin || -100, 28);
-      criteria.tokens.push('🌴 Hot (>28°C)');
+      raiseMin(28);
+      criteria.tokens.push(`🌴 Hot (>${formatTemp(28)}${unitSuffix})`);
     } else if (/warm/i.test(combined)) {
-      criteria.tempMin = Math.max(criteria.tempMin || -100, 20);
-      criteria.tempMax = Math.min(criteria.tempMax || 100, 28);
-      criteria.tokens.push('🏖️ Warm (20-28°C)');
+      raiseMin(20);
+      lowerMax(28);
+      criteria.tokens.push(`🏖️ Warm (${formatTemp(20)}-${formatTemp(28)}${unitSuffix})`);
     } else if (/mild|pleasant/i.test(combined)) {
-      criteria.tempMin = Math.max(criteria.tempMin || -100, 14);
-      criteria.tempMax = Math.min(criteria.tempMax || 100, 20);
-      criteria.tokens.push('🧣 Mild (14-20°C)');
+      raiseMin(14);
+      lowerMax(20);
+      criteria.tokens.push(`🧣 Mild (${formatTemp(14)}-${formatTemp(20)}${unitSuffix})`);
     } else if (/cool/i.test(combined)) {
-      criteria.tempMin = Math.max(criteria.tempMin || -100, 8);
-      criteria.tempMax = Math.min(criteria.tempMax || 100, 14);
-      criteria.tokens.push('🧥 Cool (8-14°C)');
+      raiseMin(8);
+      lowerMax(14);
+      criteria.tokens.push(`🧥 Cool (${formatTemp(8)}-${formatTemp(14)}${unitSuffix})`);
     } else if (/cold/i.test(combined)) {
-      criteria.tempMax = Math.min(criteria.tempMax || 100, 12);
-      criteria.tokens.push('🥶 Cold (<12°C)');
+      lowerMax(12);
+      criteria.tokens.push(`🥶 Cold (<${formatTemp(12)}${unitSuffix})`);
     } else if (/freezing/i.test(combined)) {
-      criteria.tempMax = Math.min(criteria.tempMax || 100, 2);
-      criteria.tokens.push('🧊 Freezing (≤2°C)');
+      lowerMax(2);
+      criteria.tokens.push(`🧊 Freezing (≤${formatTemp(2)}${unitSuffix})`);
     }
 
     // Explicit Numerical Expressions
-    // e.g. "> 25", ">= 20", "< 15", "20-25"
-    const rangeMatch = combined.match(/(\d+)\s*(?:-|to)\s*(\d+)/i);
+    // e.g. "> 25", ">= 20", "< 15", "20-25", "-5 to 5"
+    // Thresholds are normalised to Celsius so they can be compared against the
+    // API's temperature_2m values regardless of the active display unit.
+    const rangeMatch = combined.match(/(-?\d+(?:\.\d+)?)\s*(?:-|to)\s*(-?\d+(?:\.\d+)?)/i);
     if (rangeMatch) {
-      const minNum = parseFloat(rangeMatch[1]);
-      const maxNum = parseFloat(rangeMatch[2]);
-      criteria.tempMin = Math.min(minNum, maxNum);
-      criteria.tempMax = Math.max(minNum, maxNum);
-      criteria.tokens.push(`${criteria.tempMin}° - ${criteria.tempMax}°`);
+      const a = normalizeEnteredTemp(parseFloat(rangeMatch[1]), combined);
+      const b = normalizeEnteredTemp(parseFloat(rangeMatch[2]), combined);
+      criteria.tempMin = Math.min(a, b);
+      criteria.tempMax = Math.max(a, b);
+      criteria.tokens.push(
+        `${formatTemp(criteria.tempMin)}${unitSuffix} to ${formatTemp(criteria.tempMax)}${unitSuffix}`
+      );
     } else {
-      const greaterMatch = combined.match(/(?:>|>=|above|warmer than)\s*(-?\d+)/i);
+      const greaterMatch = combined.match(
+        /(?:>=|>|\babove\b|\bover\b|\bwarmer than\b)\s*(-?\d+(?:\.\d+)?)/i
+      );
       if (greaterMatch) {
-        criteria.tempMin = parseFloat(greaterMatch[1]);
-        criteria.tokens.push(`> ${criteria.tempMin}°`);
+        raiseMin(normalizeEnteredTemp(parseFloat(greaterMatch[1]), combined));
+        criteria.tokens.push(`> ${formatTemp(criteria.tempMin)}${unitSuffix}`);
       }
-      const lesserMatch = combined.match(/(?:<|<=|below|colder than)\s*(-?\d+)/i);
+      const lesserMatch = combined.match(
+        /(?:<=|<|\bbelow\b|\bunder\b|\bcolder than\b)\s*(-?\d+(?:\.\d+)?)/i
+      );
       if (lesserMatch) {
-        criteria.tempMax = parseFloat(lesserMatch[1]);
-        criteria.tokens.push(`< ${criteria.tempMax}°`);
+        lowerMax(normalizeEnteredTemp(parseFloat(lesserMatch[1]), combined));
+        criteria.tokens.push(`< ${formatTemp(criteria.tempMax)}${unitSuffix}`);
       }
     }
 
@@ -716,7 +879,9 @@
       themeClass = isDay ? 'theme-day-clear' : 'theme-night-clear';
     }
 
-    document.body.className = themeClass;
+    // Swap only theme classes so any other body-level class survives
+    document.body.classList.remove(...THEME_CLASSES);
+    document.body.classList.add(themeClass);
   }
 
   function renderWeather() {
@@ -809,6 +974,15 @@
       elements.sunsetVal.textContent = sunsetTime;
     }
 
+    // Data freshness indicator
+    const freshness = formatFreshness(current.time, data.utc_offset_seconds);
+    if (freshness && elements.dataFreshness) {
+      elements.dataFreshness.textContent = freshness;
+      elements.dataFreshness.hidden = false;
+    } else if (elements.dataFreshness) {
+      elements.dataFreshness.hidden = true;
+    }
+
     // Render Hourly Forecast (Next 24 Hours)
     renderHourlyForecast(hourly, current.time);
 
@@ -894,8 +1068,16 @@
       const leftPct = Math.max(0, Math.min(100, ((minVal - globalMin) / totalRange) * 100));
       const widthPct = Math.max(8, Math.min(100 - leftPct, ((maxVal - minVal) / totalRange) * 100));
 
+      // Daily UV max + max precipitation probability
+      const uvMax = daily.uv_index_max ? daily.uv_index_max[idx] : null;
+      const rainProb = daily.precipitation_probability_max
+        ? daily.precipitation_probability_max[idx]
+        : null;
+      const uvInfo = uvMax !== null && uvMax !== undefined ? getUvInfo(uvMax) : null;
+
       const row = document.createElement('div');
       row.className = 'daily-row';
+      row.setAttribute('role', 'listitem');
       row.innerHTML = `
         <div class="daily-day-col">
           <span class="daily-day-name">${dayName}</span>
@@ -905,6 +1087,29 @@
           ${getWeatherSvg(condition.icon, 1)}
         </div>
         <div class="daily-condition-label">${condition.label}</div>
+        <div class="daily-extra-col">
+          ${
+            uvInfo
+              ? `<span class="daily-extra-item daily-uv-item" data-uv-level="${uvInfo.badgeClass}" title="Max UV index">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="4"/>
+                    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+                  </svg>
+                  <span>UV ${Number(uvMax).toFixed(1)}</span>
+                </span>`
+              : ''
+          }
+          ${
+            rainProb !== null && rainProb !== undefined
+              ? `<span class="daily-extra-item" title="Chance of precipitation">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
+                  </svg>
+                  <span>${Math.round(rainProb)}%</span>
+                </span>`
+              : ''
+          }
+        </div>
         <div class="daily-temp-bar-col">
           <span class="daily-min-temp">${formatTemp(minVal)}°</span>
           <div class="daily-bar-track">
@@ -917,9 +1122,123 @@
     });
   }
 
-  // ==========================================================================
-  // Climate Search Results Rendering
-  // ==========================================================================
+// ==========================================================================
+// Climate Search Results Rendering
+// ==========================================================================
+  const CARD_TEMPLATE = `
+    <div class="city-result-top">
+      <div>
+        <h3 class="city-result-name" data-ref="name"></h3>
+        <p class="city-result-country" data-ref="country"></p>
+      </div>
+    </div>
+
+    <div class="city-result-middle">
+      <div class="city-result-temp-group">
+        <span class="city-result-temp" data-ref="temp"></span>
+        <span class="city-result-temp-unit" data-ref="tempUnit"></span>
+      </div>
+      <div class="city-result-icon" data-ref="icon"></div>
+    </div>
+
+    <div class="city-result-condition">
+      <span data-ref="condition"></span>
+    </div>
+
+    <div class="city-result-stats">
+      <div class="city-result-stat-item" title="Relative Humidity">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
+        </svg>
+        <span data-ref="humidity"></span>
+      </div>
+      <div class="city-result-stat-item" title="Wind Speed">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2" />
+        </svg>
+        <span data-ref="wind"></span>
+      </div>
+    </div>
+
+    <div class="city-result-footer">
+      <span class="action-link">
+        View Weather Details
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor">
+          <path fill-rule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clip-rule="evenodd" />
+        </svg>
+      </span>
+    </div>
+  `;
+
+  /**
+   * Build (or reuse) a result card for a city entry.
+   * Cards are cached by city id so re-sorting and unit switching only reorder
+   * existing DOM nodes instead of rebuilding ~72 cards of inline SVG.
+   */
+  function createResultCard(entry, cache) {
+    const city = entry.city;
+    let refs = cache.get(city.id);
+
+    if (!refs) {
+      const card = document.createElement('div');
+      card.className = 'city-result-card';
+      card.setAttribute('role', 'button');
+      card.setAttribute('tabindex', '0');
+      card.innerHTML = CARD_TEMPLATE;
+
+      refs = {
+        card,
+        name: card.querySelector('[data-ref="name"]'),
+        country: card.querySelector('[data-ref="country"]'),
+        temp: card.querySelector('[data-ref="temp"]'),
+        tempUnit: card.querySelector('[data-ref="tempUnit"]'),
+        icon: card.querySelector('[data-ref="icon"]'),
+        condition: card.querySelector('[data-ref="condition"]'),
+        humidity: card.querySelector('[data-ref="humidity"]'),
+        wind: card.querySelector('[data-ref="wind"]'),
+      };
+
+      const select = () => loadCityWeather(city);
+      card.addEventListener('click', select);
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          select();
+        }
+      });
+
+      cache.set(city.id, refs);
+    }
+
+    return refs;
+  }
+
+  /** Push the live values into a card. All API strings go through textContent. */
+  function updateResultCard(refs, entry) {
+    const city = entry.city;
+    const current = entry.current;
+    const condition = WMO_MAP[current.weather_code] || { label: 'Clear', icon: 'clear' };
+
+    refs.name.textContent = city.name;
+    refs.country.textContent = city.admin1 ? `${city.admin1}, ${city.country}` : city.country;
+    refs.condition.textContent = condition.label;
+
+    refs.icon.innerHTML = getWeatherSvg(condition.icon, current.is_day);
+    refs.icon.setAttribute('aria-hidden', 'true');
+
+    const humidity = current.relative_humidity_2m;
+    refs.humidity.textContent = humidity === null || humidity === undefined ? '--' : `${humidity}%`;
+
+    refs.wind.textContent = `${formatWindSpeed(current.wind_speed_10m)} ${getWindUnitSymbol()}`;
+    refs.temp.textContent = formatTemp(current.temperature_2m);
+    refs.tempUnit.textContent = getTempUnitSymbol();
+
+    refs.card.setAttribute(
+      'aria-label',
+      `View weather for ${city.name}, ${city.country}. ${condition.label}, ${formatTemp(current.temperature_2m)}${getTempUnitSymbol()}.`
+    );
+  }
+
   function renderClimateResults(matchingEntries, criteria) {
     state.matchingCities = matchingEntries;
 
@@ -933,7 +1252,13 @@
     elements.climateResultsTitle.textContent = 'Cities matching climate conditions';
     elements.climateResultsCount.textContent = `${matchingEntries.length} ${matchingEntries.length === 1 ? 'city' : 'cities'} found`;
 
-    // Active tags
+    // Be explicit that results are scoped to the curated benchmark dataset
+    elements.climateResultsSubtitle.textContent =
+      `Searched ${WORLD_CITIES.length} benchmark cities worldwide. ` +
+      'Click any city to explore its detailed real-time weather and 7-day outlook.';
+
+    // Active tags - criteria.tokens is preserved across sort/unit re-renders
+    // because callers re-parse with state.activeFilterTags (#1)
     elements.climateActiveTags.innerHTML = '';
     criteria.tokens.forEach((token) => {
       const tag = document.createElement('span');
@@ -952,92 +1277,50 @@
       return 0;
     });
 
-    elements.climateResultsGrid.innerHTML = '';
+    // Remove any previous empty-state node before rebuilding
+    const staleEmpty = elements.climateResultsGrid.querySelector('.climate-empty-state');
+    if (staleEmpty) staleEmpty.remove();
 
     if (sorted.length === 0) {
-      elements.climateResultsGrid.innerHTML = `
-        <div class="climate-empty-state">
-          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin: 0 auto; color: var(--text-muted);">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M8 15h8M9 9h.01M15 9h.01"/>
-          </svg>
-          <p>No world cities currently match this exact climate criteria.</p>
-          <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;">Try searching for a broader condition like "Sunny", "Warm", or "Cloudy".</p>
-        </div>
+      // Drop cached cards so a later match set rebuilds cleanly
+      elements.climateResultsGrid.innerHTML = '';
+      state.resultCards.clear();
+
+      const empty = document.createElement('div');
+      empty.className = 'climate-empty-state';
+      empty.innerHTML = `
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin: 0 auto; color: var(--text-muted);">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M8 15h8M9 9h.01M15 9h.01"/>
+        </svg>
       `;
+      const msg1 = document.createElement('p');
+      msg1.textContent = `No cities in the ${WORLD_CITIES.length}-city benchmark dataset currently match this exact climate criteria.`;
+      const msg2 = document.createElement('p');
+      msg2.style.fontSize = '0.85rem';
+      msg2.style.color = 'var(--text-muted)';
+      msg2.style.marginTop = '4px';
+      msg2.textContent = 'Try a broader condition like "Sunny", "Warm", or "Cloudy".';
+      empty.appendChild(msg1);
+      empty.appendChild(msg2);
+      elements.climateResultsGrid.appendChild(empty);
     } else {
+      const liveIds = new Set();
+
       sorted.forEach((entry) => {
-        const city = entry.city;
-        const current = entry.current;
-        const condition = WMO_MAP[current.weather_code] || { label: 'Clear', icon: 'clear' };
+        const refs = createResultCard(entry, state.resultCards);
+        updateResultCard(refs, entry);
+        // appendChild moves an existing node, so this is the "reorder" path
+        elements.climateResultsGrid.appendChild(refs.card);
+        liveIds.add(entry.city.id);
+      });
 
-        const card = document.createElement('div');
-        card.className = 'city-result-card';
-        card.setAttribute('role', 'button');
-        card.setAttribute('tabindex', '0');
-        card.setAttribute('aria-label', `View weather for ${city.name}, ${city.country}`);
-
-        card.innerHTML = `
-          <div class="city-result-top">
-            <div>
-              <h3 class="city-result-name">${city.name}</h3>
-              <p class="city-result-country">${city.admin1 ? city.admin1 + ', ' : ''}${city.country}</p>
-            </div>
-          </div>
-
-          <div class="city-result-middle">
-            <div class="city-result-temp-group">
-              <span class="city-result-temp">${formatTemp(current.temperature_2m)}</span>
-              <span class="city-result-temp-unit">${getTempUnitSymbol()}</span>
-            </div>
-            <div class="city-result-icon">
-              ${getWeatherSvg(condition.icon, current.is_day)}
-            </div>
-          </div>
-
-          <div class="city-result-condition">
-            <span>${condition.label}</span>
-          </div>
-
-          <div class="city-result-stats">
-            <div class="city-result-stat-item" title="Relative Humidity">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
-              </svg>
-              <span>${current.relative_humidity_2m ?? '--'}%</span>
-            </div>
-            <div class="city-result-stat-item" title="Wind Speed">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2"/>
-              </svg>
-              <span>${formatWindSpeed(current.wind_speed_10m)} ${getWindUnitSymbol()}</span>
-            </div>
-          </div>
-
-          <div class="city-result-footer">
-            <span class="action-link">
-              View Weather Details
-              <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor">
-                <path fill-rule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clip-rule="evenodd" />
-              </svg>
-            </span>
-          </div>
-        `;
-
-        // Click handler to view full city weather
-        const handleCitySelect = () => {
-          loadCityWeather(city);
-        };
-
-        card.addEventListener('click', handleCitySelect);
-        card.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            handleCitySelect();
-          }
-        });
-
-        elements.climateResultsGrid.appendChild(card);
+      // Evict cards for cities that are no longer in the result set
+      state.resultCards.forEach((refs, id) => {
+        if (!liveIds.has(id)) {
+          refs.card.remove();
+          state.resultCards.delete(id);
+        }
       });
     }
 
@@ -1048,7 +1331,13 @@
   // Core Controller Actions
   // ==========================================================================
   async function loadCityWeather(city) {
-    if (!city || !city.latitude || !city.longitude) return;
+    if (!city || city.latitude === undefined || city.latitude === null || city.longitude === undefined || city.longitude === null) return;
+
+    // Supersede any in-flight city request so a slow earlier response
+    // cannot overwrite the city the user actually selected (#5)
+    if (state.weatherController) state.weatherController.abort();
+    const controller = new AbortController();
+    state.weatherController = controller;
 
     elements.dashboard.classList.add('hidden');
     elements.climateResultsSection.classList.add('hidden');
@@ -1059,7 +1348,9 @@
     closeAutocomplete();
 
     try {
-      const weatherData = await fetchWeatherData(city.latitude, city.longitude, city.timezone);
+      const weatherData = await fetchWeatherData(city.latitude, city.longitude, city.timezone, controller.signal);
+      if (controller.signal.aborted) return;
+
       state.currentCity = city;
       state.weatherData = weatherData;
 
@@ -1070,8 +1361,12 @@
 
       renderWeather();
     } catch (err) {
+      if (err.name === 'AbortError') return;
       console.error('Weather load error:', err);
-      showError('Weather Data Unavailable', `Could not fetch weather for "${city.name}". Please check your internet connection and try again.`);
+      showError(
+        'Weather Data Unavailable',
+        `Could not fetch weather for "${city.name}". The request may have timed out - please check your internet connection and try again.`
+      );
     }
   }
 
@@ -1092,7 +1387,11 @@
       }
 
       const criteria = parseClimateCriteria(queryStr, presets);
+
+      // Persist both halves of the query so re-renders triggered by sort or
+      // unit changes reproduce identical criteria - including the tag chips (#1)
       state.activeClimateQuery = queryStr || '';
+      state.activeFilterTags = presets;
 
       const matching = allCityForecasts.filter((entry) => matchesClimateCriteria(entry, criteria));
 
@@ -1101,6 +1400,14 @@
       console.error('Climate search error:', err);
       showError('Climate Search Error', 'Failed to retrieve global meteorological data. Please try again.');
     }
+  }
+
+  /**
+   * Re-derive the criteria for the currently displayed climate result set,
+   * including any preset chip that was active.
+   */
+  function currentClimateCriteria() {
+    return parseClimateCriteria(state.activeClimateQuery, state.activeFilterTags);
   }
 
   async function handleCitySearch(cityName) {
@@ -1115,13 +1422,33 @@
     try {
       const cities = await searchCities(cityName);
       if (!cities || cities.length === 0) {
-        showError('City Not Found', `No results found for "${cityName}". Try searching with a different spelling or adding a country.`);
+        showError(
+          'City Not Found',
+          `No results found for "${cityName}". Try searching with a different spelling or adding a country.`
+        );
         return;
       }
+
+      // Ambiguous names ("Paris") get a disambiguation list instead of silently
+      // loading whichever result the API happened to rank first (#8)
+      if (cities.length > 1) {
+        showAutocomplete(cities, { disambiguate: true });
+        elements.autocompleteList.classList.remove('hidden');
+        elements.searchInput.focus();
+        return;
+      }
+
       loadCityWeather(cities[0]);
     } catch (err) {
+      if (err.name === 'AbortError') return;
       console.error('Search error:', err);
-      showError('Search Failed', 'An error occurred while searching for the city. Please try again.');
+      const timedOut = /timed out/i.test(err.message || '');
+      showError(
+        'Search Failed',
+        timedOut
+          ? 'The search request timed out. Please check your internet connection and try again.'
+          : 'An error occurred while searching for the city. Please try again.'
+      );
     }
   }
 
@@ -1140,37 +1467,117 @@
   function closeAutocomplete() {
     elements.autocompleteList.classList.add('hidden');
     elements.autocompleteList.innerHTML = '';
+    elements.autocompleteOptions = [];
+    state.activeOptionIndex = -1;
+    elements.searchInput.setAttribute('aria-expanded', 'false');
+    elements.searchInput.removeAttribute('aria-activedescendant');
   }
 
-  function showAutocomplete(results) {
+  /**
+   * Render autocomplete suggestions.
+   * City names come from an external API, so every value is written with
+   * textContent rather than interpolated into innerHTML (#7).
+   */
+  function showAutocomplete(results, options = {}) {
     if (!results || results.length === 0) {
       closeAutocomplete();
       return;
     }
 
     elements.autocompleteList.innerHTML = '';
-    results.forEach((city) => {
+    elements.autocompleteOptions = [];
+
+    results.forEach((city, idx) => {
       const item = document.createElement('div');
       item.className = 'autocomplete-item';
       item.setAttribute('role', 'option');
+      item.id = `autocomplete-option-${idx}`;
+      item.setAttribute('aria-selected', 'false');
 
       const metaParts = [];
       if (city.admin1) metaParts.push(city.admin1);
       if (city.country) metaParts.push(city.country);
 
-      item.innerHTML = `
-        <span class="autocomplete-item-name">${city.name}</span>
-        <span class="autocomplete-item-meta">${metaParts.join(', ')}</span>
-      `;
+      const name = document.createElement('span');
+      name.className = 'autocomplete-item-name';
+      name.textContent = city.name;
+
+      const meta = document.createElement('span');
+      meta.className = 'autocomplete-item-meta';
+      meta.textContent = metaParts.join(', ');
+
+      item.appendChild(name);
+      item.appendChild(meta);
 
       item.addEventListener('click', () => {
+        closeAutocomplete();
         loadCityWeather(city);
       });
+      item.addEventListener('mouseenter', () => setActiveOption(idx));
 
       elements.autocompleteList.appendChild(item);
+      elements.autocompleteOptions.push({ el: item, city });
     });
 
+    if (options.disambiguate) {
+      const hint = document.createElement('div');
+      hint.className = 'autocomplete-hint';
+      hint.textContent = `${results.length} matching locations - select one`;
+      elements.autocompleteList.insertBefore(hint, elements.autocompleteList.firstChild);
+    }
+
     elements.autocompleteList.classList.remove('hidden');
+    elements.searchInput.setAttribute('aria-expanded', 'true');
+
+    if (options.disambiguate) {
+      // Pre-select the top hit so Enter works immediately
+      setActiveOption(0);
+    }
+  }
+
+  /** Highlight one option and mirror it onto the input for screen readers. */
+  function setActiveOption(index) {
+    const options = elements.autocompleteOptions || [];
+    if (options.length === 0) return;
+
+    const bounded = (index + options.length) % options.length;
+    state.activeOptionIndex = bounded;
+
+    options.forEach((opt, i) => {
+      const isActive = i === bounded;
+      opt.el.classList.toggle('active', isActive);
+      opt.el.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+
+    const activeEl = options[bounded].el;
+    elements.searchInput.setAttribute('aria-activedescendant', activeEl.id);
+    if (typeof activeEl.scrollIntoView === 'function') {
+      activeEl.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function moveActiveOption(delta) {
+    const options = elements.autocompleteOptions || [];
+    if (options.length === 0) return;
+
+    // From "nothing highlighted", ArrowDown starts at the first option and
+    // ArrowUp starts at the last, rather than skipping an entry.
+    if (state.activeOptionIndex === -1) {
+      setActiveOption(delta > 0 ? 0 : options.length - 1);
+      return;
+    }
+
+    setActiveOption(state.activeOptionIndex + delta);
+  }
+
+  function commitActiveOption() {
+    const options = elements.autocompleteOptions || [];
+    if (options.length === 0 || state.activeOptionIndex < 0) return false;
+    const chosen = options[state.activeOptionIndex];
+    if (!chosen) return false;
+    closeAutocomplete();
+    loadCityWeather(chosen.city);
+    return true;
   }
 
   // ==========================================================================
@@ -1255,6 +1662,9 @@
         elements.quickCitiesContainer.classList.add('hidden');
         elements.climateChipsContainer.classList.remove('hidden');
         elements.searchInput.focus();
+
+        // Warm the global batch cache only when climate mode is actually used (#9)
+        fetchGlobalCitiesWeather().catch((err) => console.warn('Global prefetch:', err));
       }
       closeAutocomplete();
     }
@@ -1265,6 +1675,10 @@
     // Form submit
     elements.searchForm.addEventListener('submit', (e) => {
       e.preventDefault();
+
+      // If a suggestion is highlighted, Enter commits that suggestion
+      if (state.searchMode === 'city' && commitActiveOption()) return;
+
       closeAutocomplete();
       const query = elements.searchInput.value.trim();
       if (!query) return;
@@ -1273,6 +1687,32 @@
         handleClimateSearch(query);
       } else {
         handleCitySearch(query);
+      }
+    });
+
+    // Keyboard navigation for the autocomplete listbox
+    elements.searchInput.addEventListener('keydown', (e) => {
+      const hasOptions = (elements.autocompleteOptions || []).length > 0;
+      if (!hasOptions) return;
+
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          moveActiveOption(1);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          moveActiveOption(-1);
+          break;
+        case 'Escape':
+          e.preventDefault();
+          closeAutocomplete();
+          break;
+        case 'Tab':
+          closeAutocomplete();
+          break;
+        default:
+          break;
       }
     });
 
@@ -1287,35 +1727,59 @@
         return;
       }
 
+      // A new keystroke invalidates any highlighted option
+      state.activeOptionIndex = -1;
+      elements.searchInput.removeAttribute('aria-activedescendant');
+
+      clearTimeout(state.debounceTimer);
+
       if (state.searchMode === 'climate') {
-        // In climate mode, autocomplete can show quick climate options
-        clearTimeout(state.debounceTimer);
+        // In climate mode, offer a single "run this query" affordance
         state.debounceTimer = setTimeout(() => {
-          const suggestions = [
-            { name: `☀️ Cities with "${val}" weather`, isClimate: true },
-            { name: `🌴 Warm/Hot cities matching "${val}"`, isClimate: true },
-          ];
-          elements.autocompleteList.innerHTML = `
-            <div class="autocomplete-item" id="climate-suggest-item">
-              <span class="autocomplete-item-name">Search worldwide cities matching "${val}" →</span>
-              <span class="autocomplete-item-meta">Climate Discovery</span>
-            </div>
-          `;
-          document.getElementById('climate-suggest-item').addEventListener('click', () => {
-            handleClimateSearch(val);
-          });
+          closeAutocomplete();
+
+          const item = document.createElement('div');
+          item.className = 'autocomplete-item';
+          item.setAttribute('role', 'option');
+          item.id = 'climate-suggest-option';
+
+          const name = document.createElement('span');
+          name.className = 'autocomplete-item-name';
+          name.textContent = `Search worldwide cities matching "${val}" →`;
+
+          const meta = document.createElement('span');
+          meta.className = 'autocomplete-item-meta';
+          meta.textContent = 'Climate Discovery';
+
+          item.appendChild(name);
+          item.appendChild(meta);
+          item.addEventListener('click', () => handleClimateSearch(val));
+
+          elements.autocompleteList.innerHTML = '';
+          elements.autocompleteList.appendChild(item);
+          elements.autocompleteOptions = [];
           elements.autocompleteList.classList.remove('hidden');
+          elements.searchInput.setAttribute('aria-expanded', 'true');
         }, 250);
         return;
       }
 
-      clearTimeout(state.debounceTimer);
       state.debounceTimer = setTimeout(async () => {
+        // Abort any in-flight suggestion request and tag this one so a slow
+        // earlier response cannot overwrite newer suggestions (#5)
+        if (state.autocompleteController) state.autocompleteController.abort();
+        const controller = new AbortController();
+        state.autocompleteController = controller;
+        const seq = ++state.autocompleteSeq;
+
         try {
-          const results = await searchCities(val);
+          const results = await searchCities(val, controller.signal);
+          if (seq !== state.autocompleteSeq) return;
+          if (elements.searchInput.value.trim() !== val) return;
           showAutocomplete(results);
         } catch (err) {
-          console.error(err);
+          if (err.name === 'AbortError') return;
+          console.error('Autocomplete error:', err);
         }
       }, 280);
     });
@@ -1350,25 +1814,37 @@
     // Climate Preset Chips
     elements.climateChips.addEventListener('click', (e) => {
       const chip = e.target.closest('.climate-filter-chip');
-      if (chip && chip.dataset.condition) {
-        const condition = chip.dataset.condition;
-        elements.searchInput.value = chip.textContent.trim();
-        elements.clearBtn.classList.remove('hidden');
+      if (!chip || !chip.dataset.condition) return;
 
-        // Highlight selected chip
-        document.querySelectorAll('.climate-filter-chip').forEach((c) => c.classList.remove('active'));
-        chip.classList.add('active');
+      const condition = chip.dataset.condition;
+      const wasActive = chip.classList.contains('active');
 
-        handleClimateSearch('', condition);
+      // Clicking the active chip again clears the preset filter
+      document.querySelectorAll('.climate-filter-chip').forEach((c) => {
+        c.classList.remove('active');
+        c.setAttribute('aria-pressed', 'false');
+      });
+
+      if (wasActive) {
+        elements.searchInput.value = '';
+        handleClimateSearch('');
+        return;
       }
+
+      chip.classList.add('active');
+      chip.setAttribute('aria-pressed', 'true');
+      elements.searchInput.value = chip.textContent.trim();
+      elements.clearBtn.classList.remove('hidden');
+
+      handleClimateSearch('', condition);
     });
 
     // Climate Sort dropdown
     elements.climateSortSelect.addEventListener('change', (e) => {
       state.sortOrder = e.target.value;
       if (state.matchingCities.length > 0) {
-        const criteria = parseClimateCriteria(state.activeClimateQuery);
-        renderClimateResults(state.matchingCities, criteria);
+        // Re-derive with the stored preset tags so the filter chips survive (#1)
+        renderClimateResults(state.matchingCities, currentClimateCriteria());
       }
     });
 
@@ -1384,31 +1860,63 @@
       elements.searchInput.focus();
     });
 
+    // Manual refresh of the current city
+    if (elements.refreshBtn) {
+      elements.refreshBtn.addEventListener('click', () => {
+        if (!state.currentCity) return;
+        elements.refreshBtn.classList.add('is-loading');
+        elements.refreshBtn.disabled = true;
+        // Invalidate the global batch cache so climate data is not served stale
+        state.globalCacheTimestamp = 0;
+        loadCityWeather(state.currentCity).finally(() => {
+          elements.refreshBtn.classList.remove('is-loading');
+          elements.refreshBtn.disabled = false;
+        });
+      });
+    }
+
     // Temperature Unit Toggle
     function setUnit(newUnit) {
       if (state.unit === newUnit) return;
       state.unit = newUnit;
       localStorage.setItem('skycast_unit', newUnit);
 
-      if (newUnit === 'celsius') {
-        elements.unitC.classList.add('active');
-        elements.unitF.classList.remove('active');
-      } else {
-        elements.unitF.classList.add('active');
-        elements.unitC.classList.remove('active');
-      }
+      const useF = newUnit === 'fahrenheit';
+      elements.unitF.classList.toggle('active', useF);
+      elements.unitC.classList.toggle('active', !useF);
+      elements.unitF.setAttribute('aria-checked', useF ? 'true' : 'false');
+      elements.unitC.setAttribute('aria-checked', useF ? 'false' : 'true');
 
       // Re-render dashboard or climate results immediately without refetch
       if (state.weatherData && !elements.dashboard.classList.contains('hidden')) {
         renderWeather();
       } else if (state.matchingCities.length > 0 && !elements.climateResultsSection.classList.contains('hidden')) {
-        const criteria = parseClimateCriteria(state.activeClimateQuery);
-        renderClimateResults(state.matchingCities, criteria);
+        renderClimateResults(state.matchingCities, currentClimateCriteria());
       }
     }
 
     elements.unitC.addEventListener('click', () => setUnit('celsius'));
     elements.unitF.addEventListener('click', () => setUnit('fahrenheit'));
+
+    // Keep the °C/°F radiogroup keyboard-operable
+    elements.unitC.addEventListener('keydown', (e) => onUnitKeydown(e, elements.unitC, elements.unitF));
+    elements.unitF.addEventListener('keydown', (e) => onUnitKeydown(e, elements.unitF, elements.unitC));
+
+    // Auto-refresh live conditions while the dashboard is visible
+    setInterval(() => {
+      if (document.hidden) return;
+      if (elements.dashboard.classList.contains('hidden')) return;
+      if (!state.currentCity) return;
+      loadCityWeather(state.currentCity);
+    }, 10 * 60 * 1000);
+  }
+
+  function onUnitKeydown(e, current, other) {
+    const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', ' '];
+    if (!keys.includes(e.key)) return;
+    e.preventDefault();
+    other.click();
+    other.focus();
   }
 
   // ==========================================================================
@@ -1424,9 +1932,11 @@
       elements.unitC.classList.add('active');
       elements.unitF.classList.remove('active');
     }
+    elements.unitC.setAttribute('aria-checked', state.unit === 'celsius' ? 'true' : 'false');
+    elements.unitF.setAttribute('aria-checked', state.unit === 'fahrenheit' ? 'true' : 'false');
 
-    // Prefetch global benchmark data in background so climate queries are instantaneous
-    fetchGlobalCitiesWeather().catch((err) => console.warn('Global prefetch:', err));
+    // Note: the 72-city global batch is no longer prefetched on every page load.
+    // It is fetched lazily the first time climate mode is used (#9).
 
     // Check for saved last city in localStorage
     const saved = localStorage.getItem('skycast_last_city');

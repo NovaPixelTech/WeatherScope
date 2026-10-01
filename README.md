@@ -34,10 +34,48 @@ Powered by the [Open-Meteo API](https://open-meteo.com/), SkyCast operates with 
   - Real-time rainfall accumulation and cloud cover %.
   - Local sunrise and sunset times.
 - **24-Hour Forecast**: Scrollable horizontal strip with hourly temperatures and precipitation probabilities.
-- **7-Day Extended Forecast**: Daily outlook with normalized min/max temperature range bars.
-- **Instant Unit Switching**: Toggle between Celsius (**°C**) and Fahrenheit (**°F**) with instantaneous client-side recalculation.
-- **Dynamic Theming**: Background palette and glowing ambient orbs automatically adapt to the weather (Clear Day, Night, Rain, Thunderstorm, Snow, or Overcast).
+- **7-Day Extended Forecast**: Daily outlook with normalized min/max temperature range bars, plus per-day max UV index and chance of precipitation.
+- **Instant Unit Switching**: Toggle between Celsius (**°C**) and Fahrenheit (**°F**) with instantaneous client-side recalculation. Temperature, wind (km/h ↔ mph), and precipitation (mm ↔ in) all follow the toggle, and the choice is remembered in `localStorage`.
+- **Data Freshness**: A "Updated N min ago" stamp (corrected for the city's UTC offset) plus a manual refresh button. Live conditions also auto-refresh every 10 minutes while the dashboard is visible.
+- **Dynamic Theming**: Background palette and glowing ambient orbs automatically adapt to the weather (Clear Day, Night, Rain, Thunderstorm, Snow, or Overcast). Animations respect `prefers-reduced-motion`.
 - **Zero Dependencies**: Pure HTML5, CSS3, and modern Vanilla JavaScript — runs in any web browser without Node.js or build steps.
+
+---
+
+## ♿ Accessibility
+
+- Search field is a proper `role="combobox"` with `aria-expanded`, `aria-controls`, and `aria-activedescendant` wired to a `role="listbox"`.
+- Full keyboard support in the suggestion list: **↑ / ↓** to move (wrapping), **Enter** to select, **Esc** to dismiss, **Tab** to move on. Hovering an option also highlights it.
+- Ambiguous city names (e.g. *Paris*) open a disambiguation list instead of silently loading the top-ranked match.
+- Live regions: loading uses `role="status"`, errors use `role="alert"`, and the main content area is an `aria-live` tab panel.
+- Mode tabs, the °C/°F radiogroup, and 7-day rows all carry the ARIA roles and states their patterns require.
+- A `<noscript>` notice explains that JavaScript is required.
+
+---
+
+## 🧪 Robustness notes
+
+- Every network call is wrapped with a **12-second timeout**, and in-flight requests are **aborted** when superseded — so racing city clicks or fast typing can never leave stale data or a stuck spinner on screen.
+- The 72-city climate dataset is fetched **lazily** (only when climate mode is opened) and cached in `sessionStorage` for 5 minutes, so reloads within a session are instant and plain city searches never pay for it.
+- All text originating from the Open-Meteo API is written with `textContent`, so city names are never interpreted as markup.
+
+---
+
+## 🌡️ Climate filter parsing
+
+The natural-language parser is **unit-aware**. A numeric threshold is interpreted as Fahrenheit while the °F toggle is active and as Celsius while °C is active, unless you type an explicit `°C` / `°F` marker:
+
+| Input | °C mode | °F mode |
+| --- | --- | --- |
+| `Hot` | `> 28°C` | `> 82°F` |
+| `> 75` | `> 75°C` | `> 75°F` (≈ 23.9 °C) |
+| `20-28°C` | `20°C to 28°C` | `20°C to 28°C` (explicit marker wins) |
+| `-5 to 5` | `-5°C to 5°C` | `29°F to 41°F` |
+| `Windy` | `> 20 km/h` | `> 12 mph` |
+
+Clicking the active preset chip again clears that filter.
+
+> **Scope note:** climate searches evaluate a curated set of **72 benchmark cities**, not every populated place on Earth. The results header states this explicitly, and the empty state repeats it — an empty result means "none of these 72 cities", not "nowhere on the planet".
 
 ---
 
@@ -59,9 +97,9 @@ This will start a local server at `http://127.0.0.1:3000/` and automatically lau
 
 ```text
 Test_001/
-├── index.html        # Semantic HTML5 app markup with City & Climate mode switchers
-├── styles.css        # Glassmorphic CSS styling, dynamic themes, climate results grid
-├── app.js            # Batch climate queries, natural-language filter parser, weather controller
+├── index.html        # Semantic HTML5 app markup, ARIA wiring, City & Climate mode switchers
+├── styles.css        # Glassmorphic CSS styling, dynamic themes, climate results grid, reduced-motion support
+├── app.js            # Batch climate queries, unit-aware filter parser, weather controller
 ├── start-server.ps1  # Lightweight zero-dependency PowerShell static web server
 └── README.md         # Documentation and project overview
 ```

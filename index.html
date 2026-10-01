@@ -17,6 +17,13 @@
     <div class="ambient-orb orb-3"></div>
   </div>
 
+  <noscript>
+    <div class="noscript-warning">
+      SkyCast Weather needs JavaScript enabled to fetch and display live meteorological data.
+      Please enable JavaScript in your browser and reload the page.
+    </div>
+  </noscript>
+
   <div class="app-container">
     <!-- Top Navigation / Search Header -->
     <header class="app-header">
@@ -43,13 +50,13 @@
       <div class="search-section">
         <!-- Search Mode Switcher Tabs -->
         <div class="search-mode-tabs" role="tablist" aria-label="Search mode selection">
-          <button type="button" class="mode-tab active" id="tab-mode-city" role="tab" aria-selected="true">
+          <button type="button" class="mode-tab active" id="tab-mode-city" role="tab" aria-selected="true" aria-controls="main-content">
             <svg viewBox="0 0 20 20" fill="currentColor">
               <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 110 2h-3a1 1 0 01-1-1v-2a1 1 0 00-1-1H9a1 1 0 00-1 1v2a1 1 0 01-1 1H4a1 1 0 110-2V4zm3 1h2v2H7V5zm2 4H7v2h2V9zm2-4h2v2h-2V5zm2 4h-2v2h2V9z" clip-rule="evenodd" />
             </svg>
             <span>City Search</span>
           </button>
-          <button type="button" class="mode-tab" id="tab-mode-climate" role="tab" aria-selected="false">
+          <button type="button" class="mode-tab" id="tab-mode-climate" role="tab" aria-selected="false" aria-controls="main-content">
             <svg viewBox="0 0 20 20" fill="currentColor">
               <path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd" />
             </svg>
@@ -68,6 +75,14 @@
               class="city-input"
               placeholder="Search for a city (e.g. Paris, Tokyo, New York)..."
               required
+              role="combobox"
+              aria-label="Search for a city or climate condition"
+              aria-autocomplete="list"
+              aria-haspopup="listbox"
+              aria-controls="autocomplete-list"
+              aria-expanded="false"
+              autocomplete="off"
+              spellcheck="false"
             />
             <button type="button" id="clear-btn" class="clear-btn hidden" aria-label="Clear input">
               <svg viewBox="0 0 20 20" fill="currentColor">
@@ -84,13 +99,13 @@
         </form>
 
         <!-- Live suggestions dropdown -->
-        <div id="autocomplete-list" class="autocomplete-dropdown hidden" role="listbox"></div>
+        <div id="autocomplete-list" class="autocomplete-dropdown hidden" role="listbox" aria-label="Search suggestions"></div>
       </div>
 
       <div class="header-controls">
         <div class="unit-toggle" role="radiogroup" aria-label="Temperature unit selection">
-          <button type="button" class="unit-btn active" data-unit="celsius" id="unit-c">°C</button>
-          <button type="button" class="unit-btn" data-unit="fahrenheit" id="unit-f">°F</button>
+          <button type="button" class="unit-btn active" data-unit="celsius" id="unit-c" role="radio" aria-checked="true">°C</button>
+          <button type="button" class="unit-btn" data-unit="fahrenheit" id="unit-f" role="radio" aria-checked="false">°F</button>
         </div>
       </div>
     </header>
@@ -114,29 +129,29 @@
     <div class="climate-filter-chips hidden" id="climate-chips-container">
       <span class="quick-label">Preset Climates:</span>
       <div class="quick-chips" id="climate-chips">
-        <button class="chip climate-filter-chip" data-condition="sunny">☀️ Sunny</button>
-        <button class="chip climate-filter-chip" data-condition="cloudy">⛅ Cloudy</button>
-        <button class="chip climate-filter-chip" data-condition="rain">🌧️ Rainy</button>
-        <button class="chip climate-filter-chip" data-condition="snow">❄️ Snowy</button>
-        <button class="chip climate-filter-chip" data-condition="thunderstorm">⚡ Storm</button>
-        <button class="chip climate-filter-chip" data-condition="hot">🌴 Hot (&gt;28°C)</button>
-        <button class="chip climate-filter-chip" data-condition="warm">🏖️ Warm (20-28°C)</button>
-        <button class="chip climate-filter-chip" data-condition="mild">🧣 Mild (14-20°C)</button>
-        <button class="chip climate-filter-chip" data-condition="cold">🥶 Cold (&lt;12°C)</button>
-        <button class="chip climate-filter-chip" data-condition="windy">💨 Windy</button>
+        <button class="chip climate-filter-chip" data-condition="sunny" aria-pressed="false">☀️ Sunny</button>
+        <button class="chip climate-filter-chip" data-condition="cloudy" aria-pressed="false">⛅ Cloudy</button>
+        <button class="chip climate-filter-chip" data-condition="rain" aria-pressed="false">🌧️ Rainy</button>
+        <button class="chip climate-filter-chip" data-condition="snow" aria-pressed="false">❄️ Snowy</button>
+        <button class="chip climate-filter-chip" data-condition="thunderstorm" aria-pressed="false">⚡ Storm</button>
+        <button class="chip climate-filter-chip" data-condition="hot" aria-pressed="false">🌴 Hot (&gt;28°C)</button>
+        <button class="chip climate-filter-chip" data-condition="warm" aria-pressed="false">🏖️ Warm (20-28°C)</button>
+        <button class="chip climate-filter-chip" data-condition="mild" aria-pressed="false">🧣 Mild (14-20°C)</button>
+        <button class="chip climate-filter-chip" data-condition="cold" aria-pressed="false">🥶 Cold (&lt;12°C)</button>
+        <button class="chip climate-filter-chip" data-condition="windy" aria-pressed="false">💨 Windy</button>
       </div>
     </div>
 
     <!-- Main Content Area -->
-    <main class="main-content" id="main-content">
+    <main class="main-content" id="main-content" role="tabpanel" aria-live="polite" aria-busy="false">
       <!-- Loading State Skeleton -->
-      <div id="loading-state" class="state-card loading-state hidden">
+      <div id="loading-state" class="state-card loading-state hidden" role="status" aria-live="polite">
         <div class="spinner"></div>
         <p class="state-text" id="loading-text">Fetching live meteorological data...</p>
       </div>
 
       <!-- Error State -->
-      <div id="error-state" class="state-card error-state hidden">
+      <div id="error-state" class="state-card error-state hidden" role="alert" aria-live="assertive">
         <div class="state-icon error-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10" />
@@ -184,7 +199,7 @@
         </div>
 
         <!-- City Results Grid -->
-        <div class="climate-results-grid" id="climate-results-grid">
+        <div class="climate-results-grid" id="climate-results-grid" aria-label="Matching cities">
           <!-- Injected via JavaScript -->
         </div>
       </section>
@@ -198,11 +213,18 @@
               <h1 class="city-name" id="city-name">Paris</h1>
               <p class="location-meta" id="location-meta">Île-de-France, France</p>
               <p class="local-time" id="local-time">Saturday, Sep 26 • 16:30</p>
+              <p class="data-freshness" id="data-freshness" hidden></p>
             </div>
             <div class="condition-badge" id="condition-badge">
               <span class="badge-dot"></span>
               <span id="condition-text">Mainly Clear</span>
             </div>
+            <button type="button" class="btn btn-icon refresh-btn" id="refresh-btn" title="Refresh weather data" aria-label="Refresh weather data">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                <polyline points="21 3 21 9 15 9" />
+              </svg>
+            </button>
           </div>
 
           <div class="hero-body">
