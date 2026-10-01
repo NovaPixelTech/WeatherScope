@@ -97,6 +97,24 @@
   ];
 
   // ==========================================================================
+  // Curated Climate Presets
+  // --------------------------------------------------------------------------
+  // A preset is a single `data-condition` value on its chip. Most map straight
+  // to a keyword the parser already understands (`sunny`, `hot`, `windy`, ...).
+  // The entries below are *combinations* that expand into several keywords so
+  // one chip can express a whole "vibe" (e.g. Beach Day = clear skies AND warm).
+  // Keeping the expansion declarative means the composite presets can never
+  // drift out of sync with the individual ones.
+  // ==========================================================================
+  const CLIMATE_PRESET_EXPANSIONS = {
+    beach: 'sunny warm',
+    ski: 'snowy freezing',
+    tropical: 'hot humid',
+    breeze: 'mild windy',
+    showers: 'rain mild',
+  };
+
+  // ==========================================================================
   // State Management
   // ==========================================================================
   const state = {
@@ -711,10 +729,22 @@
       tempMin: null,
       tempMax: null,
       minWind: null,
+      minHumidity: null,
+      maxHumidity: null,
       tokens: [],
     };
 
-    const combined = `${queryStr || ''} ${presetTags.join(' ')}`.toLowerCase();
+    // Expand curated combination presets (e.g. `beach` -> "sunny warm") so the
+    // rest of the parser only ever deals with single base keywords.
+    const expandedTags = presetTags.flatMap((tag) =>
+      String(tag || '')
+        .toLowerCase()
+        .split(/\s+/)
+        .flatMap((part) => (CLIMATE_PRESET_EXPANSIONS[part] || part).split(/\s+/))
+        .filter(Boolean)
+    );
+
+    const combined = `${queryStr || ''} ${expandedTags.join(' ')}`.toLowerCase();
     const unitSuffix = getTempUnitSymbol();
 
     // Check Weather Categories
@@ -738,10 +768,18 @@
       criteria.weatherCategories.add('thunderstorm');
       criteria.tokens.push('⚡ Storm');
     }
+
+    // Check Wind Speed
+    // NOTE: thresholds are always stored in km/h (the API unit); the active
+    // display unit only affects how they are rendered.
     if (/windy|breeze/i.test(combined)) {
-      // Thresholds are always stored in km/h (the API unit); 20 km/h ~= breezy
-      criteria.minWind = 20;
+      // 20 km/h ~= breezy
+      criteria.minWind = criteria.minWind === null ? 20 : Math.max(criteria.minWind, 20);
       criteria.tokens.push(`💨 Windy (>${formatWindThreshold(20)} ${getWindUnitSymbol()})`);
+    }
+    if (/gale|very windy|strong wind|high wind/i.test(combined)) {
+      criteria.minWind = criteria.minWind === null ? 40 : Math.max(criteria.minWind, 40);
+      criteria.tokens.push(`🌪️ Gale (>${formatWindThreshold(40)} ${getWindUnitSymbol()})`);
     }
 
     // Check Temperature Descriptors.
@@ -775,6 +813,24 @@
     } else if (/freezing/i.test(combined)) {
       lowerMax(2);
       criteria.tokens.push(`🧊 Freezing (≤${formatTemp(2)}${unitSuffix})`);
+    }
+
+    // Check Humidity Comfort
+    // `relative_humidity_2m` is part of the global batch payload, so humidity
+    // filters cost nothing extra to evaluate.
+    const raiseMinHumidity = (value) => {
+      criteria.minHumidity = criteria.minHumidity === null ? value : Math.max(criteria.minHumidity, value);
+    };
+    const lowerMaxHumidity = (value) => {
+      criteria.maxHumidity = criteria.maxHumidity === null ? value : Math.min(criteria.maxHumidity, value);
+    };
+
+    if (/humid|humidity|muggy|sticky|clammy|oppressive/i.test(combined)) {
+      raiseMinHumidity(70);
+      criteria.tokens.push('💧 Humid (>70%)');
+    } else if (/\bdry\b|arid/i.test(combined)) {
+      lowerMaxHumidity(30);
+      criteria.tokens.push('🏜️ Dry (<30%)');
     }
 
     // Explicit Numerical Expressions
@@ -847,7 +903,20 @@
       return false;
     }
 
-    // 5. Raw Query Fallback Check
+    // 5. Humidity Check
+    if (criteria.minHumidity !== null || criteria.maxHumidity !== null) {
+      const humidity = current.relative_humidity_2m;
+      // A missing reading must never silently pass a humidity filter.
+      if (humidity === undefined || humidity === null) return false;
+      if (criteria.minHumidity !== null && humidity < criteria.minHumidity) {
+        return false;
+      }
+      if (criteria.maxHumidity !== null && humidity > criteria.maxHumidity) {
+        return false;
+      }
+    }
+
+    // 6. Raw Query Fallback Check
     if (criteria.rawQuery) {
       const labelMatch = weatherInfo.label.toLowerCase().includes(criteria.rawQuery);
       const cityMatch = entry.city.name.toLowerCase().includes(criteria.rawQuery);
@@ -858,6 +927,69 @@
     }
 
     return true;
+  }
+
+  // ==========================================================================
+  // Preset Chip Labels
+  // --------------------------------------------------------------------------
+  // Chips are authored in plain HTML with their *bounds* as data attributes
+  // (always Celsius / km-h), and the human-readable suffix is rendered here so
+  // the labels follow the degC/degF toggle exactly like the rest of the app.
+  // ==========================================================================
+  function chipThresholdText(chip) {
+    const parts = [];
+    const min = chip.dataset.tempMin;
+    const max = chip.dataset.tempMax;
+    const wind = chip.dataset.wind;
+    const humMin = chip.dataset.humidityMin;
+    const humMax = chip.dataset.humidityMax;
+    const unit = getTempUnitSymbol();
+
+    if (min !== undefined && max !== undefined) {
+      parts.push(`${formatTemp(Number(min))}-${formatTemp(Number(max))}${unit}`);
+    } else if (min !== undefined) {
+      parts.push(`>${formatTemp(Number(min))}${unit}`);
+    } else if (max !== undefined) {
+      parts.push(`<${formatTemp(Number(max))}${unit}`);
+    }
+
+    if (humMin !== undefined) {
+      parts.push(`>${Number(humMin)}%`);
+    } else if (humMax !== undefined) {
+      parts.push(`<${Number(humMax)}%`);
+    }
+
+    if (wind !== undefined) {
+      parts.push(`>${formatWindThreshold(Number(wind))} ${getWindUnitSymbol()}`);
+    }
+
+    return parts.length ? ` (${parts.join(' · ')})` : '';
+  }
+
+  function refreshChipThresholds() {
+    document.querySelectorAll('#climate-chips .climate-filter-chip').forEach((chip) => {
+      let span = chip.querySelector('.chip-threshold');
+      if (!span) {
+        span = document.createElement('span');
+        span.className = 'chip-threshold';
+        chip.appendChild(span);
+      }
+      span.textContent = chipThresholdText(chip);
+    });
+  }
+
+  /**
+   * Value written into the search box when a preset chip is activated.
+   * Combination presets resolve to their expanded keywords (e.g. "Sunny & Warm")
+   * so that re-running the query from the text box reproduces the same filter.
+   */
+  function presetInputValue(chip) {
+    const expansion = CLIMATE_PRESET_EXPANSIONS[chip.dataset.condition];
+    if (!expansion) return chip.textContent.trim();
+    return expansion
+      .split(/\s+/)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' & ');
   }
 
   // ==========================================================================
@@ -1805,10 +1937,25 @@
     // Quick popular city chips
     elements.quickChips.addEventListener('click', (e) => {
       const chip = e.target.closest('.chip');
-      if (chip && chip.dataset.city) {
-        setMode('city');
-        handleCitySearch(chip.dataset.city);
+      if (!chip || !chip.dataset.city) return;
+
+      setMode('city');
+
+      // Resolve against the local benchmark database first. Names like "Paris",
+      // "Sydney" or "Rome" match several places worldwide, and going through
+      // geocoding would drop the user into a disambiguation list instead of the
+      // city the chip actually advertises. The bundled entry is already
+      // unambiguous, so a popular chip stays genuinely one-click.
+      const known = WORLD_CITIES.find(
+        (city) => city.name.toLowerCase() === chip.dataset.city.trim().toLowerCase()
+      );
+
+      if (known) {
+        loadCityWeather(known);
+        return;
       }
+
+      handleCitySearch(chip.dataset.city);
     });
 
     // Climate Preset Chips
@@ -1833,7 +1980,7 @@
 
       chip.classList.add('active');
       chip.setAttribute('aria-pressed', 'true');
-      elements.searchInput.value = chip.textContent.trim();
+      elements.searchInput.value = presetInputValue(chip);
       elements.clearBtn.classList.remove('hidden');
 
       handleClimateSearch('', condition);
@@ -1887,6 +2034,9 @@
       elements.unitF.setAttribute('aria-checked', useF ? 'true' : 'false');
       elements.unitC.setAttribute('aria-checked', useF ? 'false' : 'true');
 
+      // Keep the preset chip thresholds in the same unit as everything else
+      refreshChipThresholds();
+
       // Re-render dashboard or climate results immediately without refetch
       if (state.weatherData && !elements.dashboard.classList.contains('hidden')) {
         renderWeather();
@@ -1924,6 +2074,9 @@
   // ==========================================================================
   function init() {
     setupEvents();
+
+    // Render the unit-aware thresholds on the preset chips before first paint
+    refreshChipThresholds();
 
     if (state.unit === 'fahrenheit') {
       elements.unitF.classList.add('active');

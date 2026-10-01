@@ -12,12 +12,19 @@ Powered by the [Open-Meteo API](https://open-meteo.com/), SkyCast operates with 
 1. **City Search Mode**:
    - Real-time debounced autocomplete suggestions showing matching cities, regions, and countries.
    - Enter key or quick search for any city on Earth.
-   - Quick one-click chips for popular global cities (London, New York, Tokyo, Paris, Sydney, etc.).
+   - One-click chips for 20 popular global cities, kept in strict **A-Z order** (Athens → Tokyo) and rendered as a uniformly sized grid, so every button lines up horizontally and vertically.
    - One-click GPS location detection with reverse geocoding.
 
 2. **Climate & Weather Filter Mode (New! 🎉)**:
    - **Search by preferred climate**: Type conditions such as `"Sunny"`, `"Rain"`, `"Snow"`, `"Warm"`, `"Hot > 25°C"`, or `"Cold < 10°C"`.
-   - **Quick climate presets**: One-click filter chips for *☀️ Sunny*, *⛅ Cloudy*, *🌧️ Rainy*, *❄️ Snowy*, *⚡ Storm*, *🌴 Hot (>28°C)*, *🏖️ Warm (20-28°C)*, *🧣 Mild (14-20°C)*, *🥶 Cold (<12°C)*, and *💨 Windy*.
+   - **20 one-click presets** (row 1 *sky conditions* → row 2 *temperature bands ascending* → row 3 *heat, humidity & wind* → row 4 *curated combinations*):
+     | Row | Presets |
+     | --- | --- |
+     | Sky | *☀️ Sunny*, *⛅ Cloudy*, *🌧️ Rainy*, *❄️ Snowy*, *⚡ Storm* |
+     | Temperature | *🧊 Freezing* ≤2°C, *🥶 Cold* <12°C, *🧥 Cool* 8-14°C, *🧣 Mild* 14-20°C, *🏖️ Warm* 20-28°C, *🌴 Hot* >28°C |
+     | Comfort | *💧 Humid* >70%, *🏜️ Dry* <30%, *💨 Windy* >20 km/h, *🌪️ Gale* >40 km/h |
+     | Curated | *🏝️ Beach Day*, *🎿 Ski Trip*, *🌴 Tropical*, *🍃 Mild & Breezy*, *🌈 Rainy & Mild* |
+   - **Curated combinations**: the five "vibe" presets expand into multiple base keywords via `CLIMATE_PRESET_EXPANSIONS` (e.g. *Beach Day* = clear skies **and** 20-28°C), so one chip expresses a whole vibe. The same keywords are echoed into the search box, so re-running the query reproduces the filter exactly.
    - **Interactive Results Grid**: Displays all matching cities around the globe with current live temperatures, weather icons, humidity, and wind speeds.
    - **Sorting options**: Sort matching cities by warmest first, coldest first, or alphabetical order.
    - **Seamless Drill-Down**: Click on any city card to instantly view its detailed real-time weather conditions, 24-hour hourly forecast, and 7-day outlook.
@@ -72,10 +79,28 @@ The natural-language parser is **unit-aware**. A numeric threshold is interprete
 | `20-28°C` | `20°C to 28°C` | `20°C to 28°C` (explicit marker wins) |
 | `-5 to 5` | `-5°C to 5°C` | `29°F to 41°F` |
 | `Windy` | `> 20 km/h` | `> 12 mph` |
+| `Gale` | `> 40 km/h` | `> 25 mph` |
+| `Humid` | `> 70%` | `> 70%` (humidity is unit-free) |
+| `Dry` | `< 30%` | `< 30%` |
+| `Cool` | `8°C to 14°C` | `46°F to 57°F` |
+
+The **preset chips follow the same toggle** — their numeric suffixes are rendered from `data-temp-*` / `data-wind` attributes, so switching °C ↔ °F rewrites `🏖️ Warm (20-28°C)` into `🏖️ Warm (68-82°F)` live.
 
 Clicking the active preset chip again clears that filter.
 
 > **Scope note:** climate searches evaluate a curated set of **72 benchmark cities**, not every populated place on Earth. The results header states this explicitly, and the empty state repeats it — an empty result means "none of these 72 cities", not "nowhere on the planet".
+
+---
+
+## 🔲 Preset button grid
+
+Both the *Popular Cities* and *Preset Climates* bars are rendered by one shared CSS contract rather than free-flowing flex pills:
+
+- **Horizontal alignment** comes from CSS Grid tracks (`1fr`), not intrinsic button widths — a short label like `Tokyo` can never leave a ragged gap that pushes a button out of line with the row above it.
+- **Vertical alignment** comes from a fixed chip box (`height: 38px`), so every row is pixel-identical.
+- Both bars hold **20 items**, which resolves to a clean **5 × 4** matrix on desktop and **4 × 5** below 1180px.
+- Below 1180px the column count is `auto-fit`-driven with a `minmax(min(180px, 100%), 1fr)` floor, so the widest label (`Gale (>40 km/h)`) can never truncate. Below 640px the caption stacks above the matrix and the floor drops to 150px.
+- Verified with headless Chrome from **320px to 1440px**, in both °C and °F: every chip sits on a shared column track, even spacing throughout, zero truncated labels, zero horizontal overflow.
 
 ---
 

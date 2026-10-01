@@ -110,35 +110,73 @@
       </div>
     </header>
 
-    <!-- Sub-header Quick Selection Bars -->
-    <!-- Popular Cities Bar (Visible in City mode) -->
+    <!-- Sub-header Quick Selection Bars
+         Both bars render 20 items inside an identical 5-column grid, so every
+         button is the exact same size and lines up both horizontally (equal
+         1fr columns) and vertically (equal row heights). -->
+    <!-- Popular Cities Bar (Visible in City mode) - strict A-Z sort -->
     <div class="quick-cities" id="quick-cities-container">
-      <span class="quick-label">Popular:</span>
-      <div class="quick-chips" id="quick-chips">
-        <button class="chip" data-city="London">London</button>
-        <button class="chip" data-city="New York">New York</button>
-        <button class="chip" data-city="Tokyo">Tokyo</button>
-        <button class="chip" data-city="Paris">Paris</button>
-        <button class="chip" data-city="Sydney">Sydney</button>
-        <button class="chip" data-city="Dubai">Dubai</button>
-        <button class="chip" data-city="Rome">Rome</button>
+      <span class="quick-label" id="quick-cities-label">Popular:</span>
+      <div class="quick-chips" id="quick-chips" role="group" aria-labelledby="quick-cities-label">
+        <button type="button" class="chip" data-city="Athens">Athens</button>
+        <button type="button" class="chip" data-city="Barcelona">Barcelona</button>
+        <button type="button" class="chip" data-city="Berlin">Berlin</button>
+        <button type="button" class="chip" data-city="Boston">Boston</button>
+        <button type="button" class="chip" data-city="Cape Town">Cape Town</button>
+        <button type="button" class="chip" data-city="Dubai">Dubai</button>
+        <button type="button" class="chip" data-city="Dublin">Dublin</button>
+        <button type="button" class="chip" data-city="Hong Kong">Hong Kong</button>
+        <button type="button" class="chip" data-city="Istanbul">Istanbul</button>
+        <button type="button" class="chip" data-city="London">London</button>
+        <button type="button" class="chip" data-city="Los Angeles">Los Angeles</button>
+        <button type="button" class="chip" data-city="Miami">Miami</button>
+        <button type="button" class="chip" data-city="New York">New York</button>
+        <button type="button" class="chip" data-city="Paris">Paris</button>
+        <button type="button" class="chip" data-city="Reykjavik">Reykjavik</button>
+        <button type="button" class="chip" data-city="Rome">Rome</button>
+        <button type="button" class="chip" data-city="San Francisco">San Francisco</button>
+        <button type="button" class="chip" data-city="Singapore">Singapore</button>
+        <button type="button" class="chip" data-city="Sydney">Sydney</button>
+        <button type="button" class="chip" data-city="Tokyo">Tokyo</button>
       </div>
     </div>
 
-    <!-- Climate Conditions Quick Filters (Visible in Climate mode) -->
+    <!-- Climate Conditions Quick Filters (Visible in Climate mode)
+         Order is meaningful, not arbitrary: row 1 = sky conditions,
+         row 2 = temperature bands ascending (freezing -> warm),
+         row 3 = heat + comfort + wind, row 4 = curated "vibe" combinations.
+         Numeric thresholds are unit-aware: app.js rewrites .chip-threshold text
+         whenever the degC/degF toggle changes. -->
     <div class="climate-filter-chips hidden" id="climate-chips-container">
-      <span class="quick-label">Preset Climates:</span>
-      <div class="quick-chips" id="climate-chips">
-        <button class="chip climate-filter-chip" data-condition="sunny" aria-pressed="false">☀️ Sunny</button>
-        <button class="chip climate-filter-chip" data-condition="cloudy" aria-pressed="false">⛅ Cloudy</button>
-        <button class="chip climate-filter-chip" data-condition="rain" aria-pressed="false">🌧️ Rainy</button>
-        <button class="chip climate-filter-chip" data-condition="snow" aria-pressed="false">❄️ Snowy</button>
-        <button class="chip climate-filter-chip" data-condition="thunderstorm" aria-pressed="false">⚡ Storm</button>
-        <button class="chip climate-filter-chip" data-condition="hot" aria-pressed="false">🌴 Hot (&gt;28°C)</button>
-        <button class="chip climate-filter-chip" data-condition="warm" aria-pressed="false">🏖️ Warm (20-28°C)</button>
-        <button class="chip climate-filter-chip" data-condition="mild" aria-pressed="false">🧣 Mild (14-20°C)</button>
-        <button class="chip climate-filter-chip" data-condition="cold" aria-pressed="false">🥶 Cold (&lt;12°C)</button>
-        <button class="chip climate-filter-chip" data-condition="windy" aria-pressed="false">💨 Windy</button>
+      <span class="quick-label" id="climate-chips-label">Preset Climates:</span>
+      <div class="quick-chips" id="climate-chips" role="group" aria-labelledby="climate-chips-label">
+        <!-- Row 1: sky conditions -->
+        <button type="button" class="chip climate-filter-chip" data-condition="sunny" aria-pressed="false">☀️ Sunny</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="cloudy" aria-pressed="false">⛅ Cloudy</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="rain" aria-pressed="false">🌧️ Rainy</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="snow" aria-pressed="false">❄️ Snowy</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="thunderstorm" aria-pressed="false">⚡ Storm</button>
+
+        <!-- Row 2: temperature bands, ascending -->
+        <button type="button" class="chip climate-filter-chip" data-condition="freezing" data-temp-max="2" aria-pressed="false">🧊 Freezing</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="cold" data-temp-max="12" aria-pressed="false">🥶 Cold</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="cool" data-temp-min="8" data-temp-max="14" aria-pressed="false">🧥 Cool</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="mild" data-temp-min="14" data-temp-max="20" aria-pressed="false">🧣 Mild</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="warm" data-temp-min="20" data-temp-max="28" aria-pressed="false">🏖️ Warm</button>
+
+        <!-- Row 3: heat, humidity and wind -->
+        <button type="button" class="chip climate-filter-chip" data-condition="hot" data-temp-min="28" aria-pressed="false">🌴 Hot</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="humid" data-humidity-min="70" aria-pressed="false">💧 Humid</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="dry" data-humidity-max="30" aria-pressed="false">🏜️ Dry</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="windy" data-wind="20" aria-pressed="false">💨 Windy</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="gale" data-wind="40" aria-pressed="false">🌪️ Gale</button>
+
+        <!-- Row 4: curated combinations (expanded by CLIMATE_PRESET_EXPANSIONS) -->
+        <button type="button" class="chip climate-filter-chip" data-condition="beach" aria-pressed="false">🏝️ Beach Day</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="ski" aria-pressed="false">🎿 Ski Trip</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="tropical" aria-pressed="false">🌴 Tropical</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="breeze" aria-pressed="false">🍃 Mild &amp; Breezy</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="showers" aria-pressed="false">🌈 Rainy &amp; Mild</button>
       </div>
     </div>
 

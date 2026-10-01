@@ -560,23 +560,27 @@ body {
 }
 
 /* ==========================================================================
-   Quick Chips Bars (City & Climate) - High-Visibility Pills
+   Quick Chips Bars (City & Climate) - Uniformly Aligned Button Matrix
+   --------------------------------------------------------------------------
+   Both bars share one layout contract so every chip is the exact same size and
+   lines up both horizontally (equal `1fr` grid columns) and vertically (equal
+   row heights), regardless of how long its label is. Because the columns are
+   grid tracks rather than intrinsic-width flex items, short labels can never
+   leave ragged gaps or push a button out of line with the row above it.
    ========================================================================== */
 .quick-cities, .climate-filter-chips {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  scrollbar-width: none;
-}
-
-.quick-cities::-webkit-scrollbar, .climate-filter-chips::-webkit-scrollbar {
-  display: none;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  column-gap: 16px;
+  row-gap: 10px;
 }
 
 .quick-label {
-  font-size: 0.85rem;
+  /* Line-height is locked to the chip height so the caption stays optically
+     centred against the first chip row. */
+  line-height: 38px;
+  font-size: 0.74rem;
   font-weight: 800;
   color: var(--text-secondary);
   text-transform: uppercase;
@@ -585,25 +589,43 @@ body {
 }
 
 .quick-chips {
-  display: flex;
-  align-items: center;
+  display: grid;
+  /* 5 tracks x 4 rows: both bars hold 20 items, so desktop lands on a fully
+     filled matrix with no empty cells. */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .chip {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  /* Fixed vertical rhythm => every chip in every row is pixel-identical */
+  height: 38px;
+  padding: 0 12px;
   font-family: inherit;
-  font-size: 0.86rem;
+  font-size: 0.8rem;
   font-weight: 600;
-  padding: 7px 15px;
+  line-height: 36px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   background: rgba(13, 22, 41, 0.82);
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: var(--radius-full);
   color: #ffffff;
   cursor: pointer;
-  white-space: nowrap;
-  transition: all var(--transition-fast);
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+    color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+/* Numeric threshold suffix injected by app.js (unit-aware) */
+.chip-threshold {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
 }
 
 .chip:hover {
@@ -614,11 +636,25 @@ body {
   box-shadow: 0 4px 12px rgba(56, 189, 248, 0.25);
 }
 
+.chip:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
 .chip.active {
   background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
   border-color: #38bdf8;
   color: #ffffff;
   box-shadow: 0 0 14px rgba(56, 189, 248, 0.4);
+}
+
+@media (max-width: 1180px) {
+  /* Below this width a fixed 5th column no longer fits the widest label
+     ("Gale (>40 km/h)"), so let the grid pick the column count itself. The
+     min() guard stops the track from overflowing on very narrow screens. */
+  .quick-chips {
+    grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  }
 }
 
 /* ==========================================================================
@@ -1687,6 +1723,22 @@ body {
 
   .search-section {
     max-width: 100%;
+  }
+
+  /* Stack the caption above the matrix so the full width goes to the buttons. */
+  .quick-cities,
+  .climate-filter-chips {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 8px;
+  }
+
+  .quick-label {
+    line-height: 1.4;
+    font-size: 0.72rem;
+  }
+
+  .quick-chips {
+    grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
   }
 
   .hero-card {
