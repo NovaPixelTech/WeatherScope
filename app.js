@@ -129,7 +129,7 @@
     activeFilterTags: [],
     matchingCities: [],
     resultCards: new Map(), // cityId -> { card, ...refs } for node reuse
-    sortOrder: 'temp-desc',
+    sortOrder: 'name-asc',
     // Race-condition guards
     autocompleteSeq: 0,
     autocompleteController: null,
@@ -1371,6 +1371,134 @@
     );
   }
 
+  // ==========================================================================
+  // Adaptive Result Sorting
+  // --------------------------------------------------------------------------
+  // The sort dropdown mirrors the active climate filter instead of offering a
+  // fixed list. Every measurement the filter actually constrains becomes a
+  // sortable axis in both directions, so a "Gale" search offers wind ordering
+  // and nothing else, while "Beach Day" (clear skies + warm) offers temperature
+  // ordering. City name is unconditional - every city has one.
+  // ==========================================================================
+  const SORT_DIMENSIONS = [
+    {
+      key: 'temp',
+      label: 'Temperature',
+      applies: (criteria) => criteria.tempMin !== null || criteria.tempMax !== null,
+      value: (entry) => entry.current.temperature_2m,
+    },
+    {
+      key: 'humidity',
+      label: 'Humidity',
+      applies: (criteria) => criteria.minHumidity !== null || criteria.maxHumidity !== null,
+      value: (entry) => entry.current.relative_humidity_2m,
+    },
+    {
+      key: 'wind',
+      label: 'Wind speed',
+      applies: (criteria) => criteria.minWind !== null,
+      value: (entry) => entry.current.wind_speed_10m,
+    },
+  ];
+
+  /** Build the option list for a given filter: relevant axes first, names last. */
+  function buildSortOptions(criteria) {
+    const options = SORT_DIMENSIONS.filter((dimension) => dimension.applies(criteria)).flatMap(
+      (dimension) => [
+        { value: `${dimension.key}-desc`, label: `${dimension.label} (higher to lower)` },
+        { value: `${dimension.key}-asc`, label: `${dimension.label} (lower to higher)` },
+      ]
+    );
+
+    // Name sorting needs no filter to justify it and no reading to resolve it,
+    // so it stays available for purely categorical filters (Sunny, Storm, ...)
+    options.push({ value: 'name-asc', label: 'City name (A-Z)' });
+    options.push({ value: 'name-desc', label: 'City name (Z-A)' });
+
+    return options;
+  }
+
+  /** True when a filter caps a value but never raises a floor (e.g. "< 2°C"). */
+  function hasCeilingOnly(min, max) {
+    return min === null && max !== null;
+  }
+
+  /**
+   * Default selection for a freshly built option list: the leading measurement,
+   * oriented so the filter's own bounds read naturally. A ceiling-only filter
+   * (Freezing, Cold, Dry) leads with its lowest values; everything else leads
+   * with its highest, which also preserves the historical "warmest first"
+   * default for the temperature bands.
+   */
+  function preferredSortValue(criteria) {
+    if (criteria.tempMin !== null || criteria.tempMax !== null) {
+      return hasCeilingOnly(criteria.tempMin, criteria.tempMax) ? 'temp-asc' : 'temp-desc';
+    }
+    if (criteria.minHumidity !== null || criteria.maxHumidity !== null) {
+      return hasCeilingOnly(criteria.minHumidity, criteria.maxHumidity) ? 'humidity-asc' : 'humidity-desc';
+    }
+    if (criteria.minWind !== null) return 'wind-desc';
+    return 'name-asc';
+  }
+
+  /**
+   * Rebuild the dropdown for the current filter. An explicit user choice is
+   * preserved whenever its axis is still offered, so re-renders triggered by a
+   * unit toggle or a fresh search do not silently discard the selection.
+   */
+  function syncSortOptions(criteria) {
+    const select = elements.climateSortSelect;
+    if (!select) return;
+
+    const options = buildSortOptions(criteria);
+    if (!options.some((option) => option.value === state.sortOrder)) {
+      state.sortOrder = preferredSortValue(criteria);
+    }
+
+    select.innerHTML = '';
+    options.forEach(({ value, label }) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      select.appendChild(option);
+    });
+    select.value = state.sortOrder;
+  }
+
+  /** Deterministic tie-breaker, also the comparator for name-only sorts. */
+  function compareCityNames(a, b) {
+    return a.city.name.localeCompare(b.city.name, 'en');
+  }
+
+  function sortClimateEntries(entries, sortValue) {
+    const [metricKey, direction] = String(sortValue || 'name-asc').split('-');
+    const metric = SORT_DIMENSIONS.find((dimension) => dimension.key === metricKey);
+    const sign = direction === 'desc' ? -1 : 1;
+
+    return [...entries].sort((a, b) => {
+      // With no metric to look up, the name *is* the value being ordered, so the
+      // direction has to apply to the name comparison itself.
+      if (!metric) return compareCityNames(a, b) * sign;
+
+      const valueA = metric.value(a);
+      const valueB = metric.value(b);
+      const missingA = valueA === null || valueA === undefined || Number.isNaN(valueA);
+      const missingB = valueB === null || valueB === undefined || Number.isNaN(valueB);
+
+      // A missing reading always sinks to the bottom, in either direction. The
+      // previous `?? -999` sentinel made an absent temperature look like the
+      // coldest reading on earth and floated such cities to the top of
+      // "coldest first".
+      if (missingA || missingB) {
+        if (missingA && missingB) return compareCityNames(a, b);
+        return missingA ? 1 : -1;
+      }
+
+      // Equal readings would otherwise reorder between renders.
+      return valueA === valueB ? compareCityNames(a, b) : (valueA - valueB) * sign;
+    });
+  }
+
   function renderClimateResults(matchingEntries, criteria) {
     state.matchingCities = matchingEntries;
 
@@ -1399,15 +1527,11 @@
       elements.climateActiveTags.appendChild(tag);
     });
 
-    // Sort entries according to current selection
-    const sorted = [...matchingEntries].sort((a, b) => {
-      const tempA = a.current.temperature_2m ?? -999;
-      const tempB = b.current.temperature_2m ?? -999;
-      if (state.sortOrder === 'temp-desc') return tempB - tempA;
-      if (state.sortOrder === 'temp-asc') return tempA - tempB;
-      if (state.sortOrder === 'name-asc') return a.city.name.localeCompare(b.city.name);
-      return 0;
-    });
+    // The dropdown mirrors the active filter, so it is rebuilt here - before the
+    // ordering - and re-validates state.sortOrder against the new option list.
+    syncSortOptions(criteria);
+
+    const sorted = sortClimateEntries(matchingEntries, state.sortOrder);
 
     // Remove any previous empty-state node before rebuilding
     const staleEmpty = elements.climateResultsGrid.querySelector('.climate-empty-state');

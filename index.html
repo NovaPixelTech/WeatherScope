@@ -227,9 +227,12 @@
             <div class="climate-active-tags" id="climate-active-tags"></div>
             <div class="climate-sort-wrapper">
               <label for="climate-sort-select" class="sort-label">Sort:</label>
+              <!-- Options are rebuilt from the active climate filter on every render:
+                   each measurement the filter constrains (temperature, humidity, wind)
+                   is offered higher-to-lower and lower-to-higher, and city name is
+                   always available. This single option is the pre-render baseline;
+                   it is always present in the generated list too. -->
               <select id="climate-sort-select" class="climate-select">
-                <option value="temp-desc">Warmest first</option>
-                <option value="temp-asc">Coldest first</option>
                 <option value="name-asc">City name (A-Z)</option>
               </select>
             </div>
