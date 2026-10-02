@@ -41,12 +41,50 @@ Powered by the [Open-Meteo API](https://open-meteo.com/), SkyCast operates with 
   - Real-time rainfall accumulation and cloud cover %.
   - Local sunrise and sunset times.
   - **Local Time** card: the city's live clock, its UTC offset, how far it sits from *your* clock, and your own time for direct comparison.
+- **Personal Weather Assistant**: one headline sentence plus six recommendation tiles — see [Weather Assistant](#-personal-weather-assistant).
 - **24-Hour Forecast**: Scrollable horizontal strip with hourly temperatures and precipitation probabilities.
 - **7-Day Extended Forecast**: Daily outlook with normalized min/max temperature range bars, plus per-day max UV index and chance of precipitation.
 - **Instant Unit Switching**: Toggle between Celsius (**°C**) and Fahrenheit (**°F**) with instantaneous client-side recalculation. Temperature, wind (km/h ↔ mph), and precipitation (mm ↔ in) all follow the toggle, and the choice is remembered in `localStorage`.
 - **Data Freshness**: A "Updated N min ago" stamp (corrected for the city's UTC offset) plus a manual refresh button. Live conditions also auto-refresh every 10 minutes while the dashboard is visible.
 - **Dynamic Theming**: Background palette and glowing ambient orbs automatically adapt to the weather (Clear Day, Night, Rain, Thunderstorm, Snow, or Overcast). Animations respect `prefers-reduced-motion`.
 - **Zero Dependencies**: Pure HTML5, CSS3, and modern Vanilla JavaScript — runs in any web browser without Node.js or build steps.
+
+---
+
+## 🧠 Personal Weather Assistant
+
+A forecast tells you *what the weather is*. The assistant card — the first thing under the current-weather hero — tells you **what to do about it**, in one headline sentence and six short tiles.
+
+| Surface | Question it answers |
+| --- | --- |
+| **Headline** | *"Wet afternoon ahead — consider outdoor plans before 14:00."* / *"Snowy today."* / *"Pleasant and dry — good day to be outside."* |
+| ☔ **Umbrella** | *Should I take one, and when is the wettest stretch?* |
+| 🚶 **Walk** | *When is the driest, most comfortable window for a walk?* (up to 4 hours) |
+| 🚗 **Wash car** | *Is there a long enough dry stretch — and is it cut short by rain?* |
+| 🚴 **Cycling** | *Safe and pleasant to ride?* |
+| 🏊 **Swimming** | *Is the air temperature good for a swim?* (air only — never water temperature) |
+| 👕 **What to wear** | *Layers, jacket or t-shirt, umbrella, sun protection — plus the warmest/coolest hour.* |
+| 🌧️ **Rain during your…** | *Morning / Midday / Afternoon / Evening* — a one-line answer per window. |
+
+### How it is built
+
+- **No second API call.** The hourly block the dashboard already requests gained `apparent_temperature`, `precipitation`, `wind_speed_10m` and `cloud_cover` — four extra fields on the *same* request. Everything else is computed client-side.
+- **`advice.js` is pure.** It never touches the DOM, never fetches, and stores nothing. The app injects its own unit formatters (`formatTemp`, `formatWindSpeed`, `formatPrecip`), so thresholds stay in **Celsius / km-h / mm** internally while the text follows the °C ↔ °F toggle exactly like the rest of the page.
+- **Memoised, not recomputed.** The analysed forecast is cached against the hourly payload's identity, so a unit toggle or a window switch does no redundant work; switching windows only recomputes the window answer, never the six tiles.
+- **One thresholds object.** Every boundary lives in `THRESHOLDS` at the top of `advice.js` — the single place to tune behaviour.
+- **Degrades, never breaks.** Missing precipitation, partial arrays, `null` entries, an unusable payload, or even a payload that throws on property access each fall back to a *Not enough forecast data* state. One failing recommendation can never take the dashboard down with it, and the card hides itself if there is nothing to say.
+- **Nothing about you is stored.** The selected window lives in memory for the session only — no commute, no routine, no personal data in `localStorage`, `sessionStorage` or cookies.
+- **Accessible by construction.** The window selector is a real `role="radiogroup"` with roving tabindex and arrow-key navigation; the headline and the window answer are polite live regions; every tile is a `role="listitem"`.
+
+### Running the tests
+
+The engine and its dashboard wiring have a zero-dependency suite built on the Node test runner:
+
+```powershell
+node --test
+```
+
+`tests/advice.test.js` covers the recommendation logic (thresholds, units, late-night scope, missing data, hostile payloads, determinism) and `tests/wiring.test.js` covers the glue (browser global, script order, element bindings, card placement, escaping, styling).
 
 ---
 
@@ -92,6 +130,7 @@ The dashboard, climate grid and suggestion dropdown all live inside `<main aria-
 - Live regions: loading uses `role="status"`, errors use `role="alert"`, and the main content area is an `aria-live` tab panel.
 - **Ticking clocks are `aria-hidden`** so their per-second updates are not announced as live-region changes; each city card and suggestion instead exposes its zone and its offset versus you through a stable `aria-label`. See [Live local time](#%EF%B8%8F-live-local-time--time-zone-difference).
 - Mode tabs, the °C/°F radiogroup, and 7-day rows all carry the ARIA roles and states their patterns require.
+- The Weather Assistant's *Rain during your…?* selector is a `role="radiogroup"` with roving `tabindex`, arrow-key navigation, and `aria-checked` on the selected window; its headline and answer are polite live regions.
 - A `<noscript>` notice explains that JavaScript is required.
 
 ---
@@ -101,6 +140,7 @@ The dashboard, climate grid and suggestion dropdown all live inside `<main aria-
 - Every network call is wrapped with a **12-second timeout**, and in-flight requests are **aborted** when superseded — so racing city clicks or fast typing can never leave stale data or a stuck spinner on screen.
 - The 72-city climate dataset is fetched **lazily** (only when climate mode is opened) and cached in `sessionStorage` for 5 minutes, so reloads within a session are instant and plain city searches never pay for it.
 - All text originating from the Open-Meteo API is written with `textContent`, so city names are never interpreted as markup.
+- The Weather Assistant's copy is rendered the same way: engine strings are written node-by-node with `textContent` (the only `innerHTML` in its render path is `grid.innerHTML = ''`), so a malformed forecast string cannot inject markup.
 
 ---
 
@@ -187,6 +227,10 @@ Test_001/
 ├── index.html        # Semantic HTML5 app markup, ARIA wiring, City & Climate mode switchers
 ├── styles.css        # Glassmorphic CSS styling, dynamic themes, climate results grid, reduced-motion support
 ├── app.js            # Batch climate queries, unit-aware filter parser, weather controller
+├── advice.js         # Personal Weather Assistant engine (pure, unit-agnostic, no DOM access)
+├── tests/
+│   ├── advice.test.js    # Recommendation logic: thresholds, units, scope, missing data, determinism
+│   └── wiring.test.js    # Dashboard glue: global, script order, element bindings, escaping, styling
 ├── start-server.ps1  # Lightweight zero-dependency PowerShell static web server
 └── README.md         # Documentation and project overview
 ```

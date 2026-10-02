@@ -1488,6 +1488,236 @@ body {
   color: #ffffff;
 }
 
+/* ==========================================================================
+   Personal Weather Assistant
+   --------------------------------------------------------------------------
+   Six compact tiles plus one headline sentence. Tiles are colour-coded by
+   tone (good / warn / bad / unknown) using a left border + icon tint rather
+   than a full fill, so the text keeps its AAA contrast on every theme.
+   ========================================================================== */
+
+.assistant-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.assistant-card[hidden] {
+  display: none;
+}
+
+.assistant-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.assistant-scope {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+/* --- Headline sentence -------------------------------------------------- */
+
+.assistant-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: var(--radius-md);
+  background: rgba(18, 30, 56, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-left: 4px solid var(--assistant-tone, var(--accent-cyan));
+}
+
+.assistant-summary[data-tone='good'] { --assistant-tone: var(--accent-emerald); }
+.assistant-summary[data-tone='warn'] { --assistant-tone: var(--accent-yellow); }
+.assistant-summary[data-tone='bad'] { --assistant-tone: var(--accent-rose); }
+.assistant-summary[data-tone='unknown'] { --assistant-tone: var(--text-dim); }
+
+.assistant-summary-icon {
+  font-size: 1.6rem;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+.assistant-summary-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.assistant-summary-headline {
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.assistant-summary-detail {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* --- Recommendation tiles ----------------------------------------------- */
+
+.assistant-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.assistant-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: rgba(18, 30, 56, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-left: 3px solid var(--tile-tone, var(--accent-cyan));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  transition: transform var(--transition-fast), background var(--transition-fast);
+}
+
+.assistant-tile:hover {
+  background: rgba(24, 40, 74, 0.88);
+  transform: translateY(-2px);
+}
+
+.assistant-tile[data-tone='good'] { --tile-tone: var(--accent-emerald); }
+.assistant-tile[data-tone='warn'] { --tile-tone: var(--accent-yellow); }
+.assistant-tile[data-tone='bad'] { --tile-tone: var(--accent-rose); }
+.assistant-tile[data-tone='unknown'] { --tile-tone: var(--text-dim); }
+
+.assistant-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.assistant-tile-icon {
+  font-size: 1.05rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.assistant-tile-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.assistant-tile-headline {
+  font-size: 0.98rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.assistant-tile-detail {
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* --- "Rain during your ...?" window selector ----------------------------- */
+
+.assistant-window {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.assistant-window-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.assistant-window-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.assistant-window-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.assistant-window-tab {
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: rgba(18, 30, 56, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-full);
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.assistant-window-tab:hover {
+  background: rgba(24, 40, 74, 0.9);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.assistant-window-tab[aria-checked='true'] {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: var(--accent-cyan);
+  color: #ffffff;
+}
+
+.assistant-window-tab:focus-visible {
+  outline: 3px solid var(--card-border-focus);
+  outline-offset: 2px;
+}
+
+.assistant-window-answer {
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* --- Narrow screens ------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  .assistant-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .assistant-window-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .assistant-window-tabs {
+    width: 100%;
+  }
+
+  .assistant-window-tab {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-tile:hover {
+    transform: none;
+  }
+}
+
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

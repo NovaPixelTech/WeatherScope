@@ -136,6 +136,11 @@
     weatherController: null,
     // Active autocomplete options for keyboard navigation
     activeOptionIndex: -1,
+    // Weather Assistant: the selected "Rain during your ...?" window and a
+    // memo of the last bundle. The selection is deliberately session-only -
+    // no personal routine is persisted to storage.
+    adviceWindowKey: 'morning',
+    adviceCache: null,
   };
 
   const THEME_CLASSES = [
@@ -659,6 +664,17 @@
     footerUserZone: document.getElementById('footer-user-zone'),
     hourlyTzLabel: document.getElementById('hourly-tz-label'),
     dailyTzLabel: document.getElementById('daily-tz-label'),
+
+    // Personal Weather Assistant
+    assistantCard: document.getElementById('assistant-card'),
+    assistantScope: document.getElementById('assistant-scope'),
+    assistantSummary: document.getElementById('assistant-summary'),
+    assistantSummaryIcon: document.getElementById('assistant-summary-icon'),
+    assistantSummaryHeadline: document.getElementById('assistant-summary-headline'),
+    assistantSummaryDetail: document.getElementById('assistant-summary-detail'),
+    assistantGrid: document.getElementById('assistant-grid'),
+    assistantWindowTabs: document.getElementById('assistant-window-tabs'),
+    assistantWindowAnswer: document.getElementById('assistant-window-answer'),
   };
 
   // The hero's clock surfaces all read the selected city's timezone, so they are
@@ -1062,7 +1078,19 @@
         'wind_direction_10m',
         'uv_index',
       ].join(','),
-      hourly: ['temperature_2m', 'weather_code', 'precipitation_probability', 'is_day'].join(','),
+      // The Weather Assistant reads the same hourly block, so apparent
+      // temperature, precipitation amount, wind and cloud cover are added
+      // here rather than costing a second API request.
+      hourly: [
+        'temperature_2m',
+        'apparent_temperature',
+        'precipitation',
+        'precipitation_probability',
+        'weather_code',
+        'wind_speed_10m',
+        'cloud_cover',
+        'is_day',
+      ].join(','),
       daily: [
         'weather_code',
         'temperature_2m_max',
@@ -1532,6 +1560,9 @@
     // Render Hourly Forecast (Next 24 Hours)
     renderHourlyForecast(hourly, current.time);
 
+    // Render the Personal Weather Assistant from the same hourly payload
+    renderAssistant(data);
+
     // Render 7-Day Forecast
     renderDailyForecast(daily);
 
@@ -1592,6 +1623,218 @@
       `;
       elements.hourlyStrip.appendChild(card);
     });
+  }
+
+  // ==========================================================================
+  // Personal Weather Assistant
+  // --------------------------------------------------------------------------
+  // Everything below reads data the dashboard already fetched. The engine
+  // (`advice.js`) is pure and unit-agnostic, so this layer only:
+  //   1. hands it the hourly payload + the app's unit formatters,
+  //   2. memoises the analysis against the hourly payload's identity, and
+  //   3. paints the result into the card.
+  // Every string the engine returns is written with `textContent` rather than
+  // interpolated into markup, because it is derived from external API data.
+  // ==========================================================================
+  function adviceFormat() {
+    return {
+      temp: formatTemp,
+      tempSymbol: getTempUnitSymbol(),
+      wind: formatWindSpeed,
+      windSymbol: getWindUnitSymbol(),
+      precip: formatPrecip,
+      precipSymbol: getPrecipUnitSymbol(),
+    };
+  }
+
+  /**
+   * Analyse the hourly payload once per forecast.
+   *
+   * The cache is keyed on the hourly object itself: a fresh fetch produces a
+   * new object (and therefore a new profile), while unit toggles are the only
+   * other invalidation - the thresholds stay in Celsius internally and the
+   * formatters passed in decide what the visitor actually sees.
+   */
+  function getAdviceProfile(data) {
+    if (!window.SkyCastAdvice) return null;
+
+    const hourly = data.hourly;
+    const current = data.current;
+    const uvMax = data.daily && data.daily.uv_index_max ? data.daily.uv_index_max[0] : null;
+    if (!hourly || !Array.isArray(hourly.time)) return null;
+
+    const cache = state.adviceCache;
+    if (cache && cache.hourly === hourly && cache.unit === state.unit && cache.uvMax === uvMax) {
+      return cache.profile;
+    }
+
+    let profile = null;
+    try {
+      profile = window.SkyCastAdvice.analyze({
+        hourly,
+        currentTime: current ? current.time : null,
+        format: adviceFormat(),
+      });
+    } catch (err) {
+      // The engine is defensive by design, but a bug here must never take the
+      // forecast down with it: the card simply stays hidden.
+      console.warn('SkyCast: the Weather Assistant could not be analysed', err);
+      return null;
+    }
+
+    state.adviceCache = { hourly, unit: state.unit, uvMax, profile, windowKey: null, recommendations: null };
+    return profile;
+  }
+
+  /**
+   * Recommendations for the selected window, memoised on the profile.
+   *
+   * Switching windows reuses the cached profile, so only the window lookup is
+   * recomputed - the six tiles above it cannot change and are not re-painted.
+   */
+  function getAdviceRecommendations(profile, windowKey) {
+    if (!window.SkyCastAdvice || !profile) return null;
+
+    const cache = state.adviceCache;
+    if (cache && cache.windowKey === windowKey && cache.recommendations) {
+      return cache.recommendations;
+    }
+
+    let built = null;
+    try {
+      built = window.SkyCastAdvice.getRecommendations(profile, windowKey);
+    } catch (err) {
+      console.warn('SkyCast: the Weather Assistant could not be calculated', err);
+      return null;
+    }
+
+    if (cache) {
+      cache.windowKey = windowKey;
+      cache.recommendations = built;
+    }
+    return built;
+  }
+
+  function renderAssistant(data) {
+    const card = elements.assistantCard;
+    if (!card) return;
+
+    const profile = getAdviceProfile(data);
+    const recommendations = getAdviceRecommendations(profile, state.adviceWindowKey);
+    if (!profile || !profile.ok || !recommendations || !recommendations.rainWindow) {
+      card.hidden = true;
+      return;
+    }
+
+    card.hidden = false;
+
+    if (elements.assistantScope) {
+      elements.assistantScope.textContent = profile.scope === 'next24'
+        ? 'Based on the next 24 hours'
+        : 'Based on the rest of today';
+    }
+
+    // --- Headline -----------------------------------------------------------
+    const summary = recommendations.summary;
+    elements.assistantSummary.dataset.tone = summary.tone || 'unknown';
+    elements.assistantSummaryIcon.textContent = summary.icon || '⛅';
+    elements.assistantSummaryHeadline.textContent = summary.headline;
+    elements.assistantSummaryDetail.textContent = summary.detail || '';
+
+    // --- Tiles --------------------------------------------------------------
+    const grid = elements.assistantGrid;
+    grid.innerHTML = '';
+    window.SkyCastAdvice.ADVICE_ORDER.forEach((key) => {
+      const tile = recommendations.decisions[key];
+      if (!tile) return;
+
+      const el = document.createElement('div');
+      el.className = 'assistant-tile';
+      el.dataset.tone = tile.tone || 'unknown';
+      el.setAttribute('role', 'listitem');
+
+      const icon = document.createElement('span');
+      icon.className = 'assistant-tile-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = tile.icon || '';
+
+      const label = document.createElement('span');
+      label.className = 'assistant-tile-label';
+      label.textContent = tile.label || '';
+
+      const head = document.createElement('div');
+      head.className = 'assistant-tile-head';
+      head.append(icon, label);
+
+      const headline = document.createElement('p');
+      headline.className = 'assistant-tile-headline';
+      headline.textContent = tile.headline;
+
+      el.append(head, headline);
+
+      if (tile.detail) {
+        const detail = document.createElement('p');
+        detail.className = 'assistant-tile-detail';
+        detail.textContent = tile.detail;
+        el.append(detail);
+      }
+
+      grid.appendChild(el);
+    });
+
+    renderAssistantWindowTabs();
+    renderAssistantWindowAnswer(recommendations);
+  }
+
+  function renderAssistantWindowTabs() {
+    const container = elements.assistantWindowTabs;
+    if (!container || !window.SkyCastAdvice) return;
+
+    container.innerHTML = '';
+    window.SkyCastAdvice.RAIN_WINDOWS.forEach((w) => {
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'assistant-window-tab';
+      tab.setAttribute('role', 'radio');
+      tab.dataset.windowKey = w.key;
+      tab.textContent = w.label;
+      tab.setAttribute('aria-checked', w.key === state.adviceWindowKey ? 'true' : 'false');
+      tab.tabIndex = w.key === state.adviceWindowKey ? 0 : -1;
+      container.appendChild(tab);
+    });
+  }
+
+  function renderAssistantWindowAnswer(recommendations) {
+    const answer = elements.assistantWindowAnswer;
+    if (!answer || !recommendations || !recommendations.rainWindow) return;
+
+    const win = recommendations.rainWindow;
+    answer.textContent = `${win.headline}. ${win.detail}`.replace(/\s+\./g, '.').trim();
+  }
+
+  /**
+   * Window switch. Only the answer line is repainted: the six tiles and the
+   * headline do not depend on which window is selected.
+   */
+  function onAssistantWindowChange(key) {
+    if (state.adviceWindowKey === key) return;
+
+    const tabs = elements.assistantWindowTabs;
+    if (tabs) {
+      tabs.querySelectorAll('.assistant-window-tab').forEach((tab) => {
+        const isActive = tab.dataset.windowKey === key;
+        tab.setAttribute('aria-checked', isActive ? 'true' : 'false');
+        tab.tabIndex = isActive ? 0 : -1;
+        if (isActive) tab.focus();
+      });
+    }
+
+    const profile = state.adviceCache ? state.adviceCache.profile : null;
+    const recommendations = getAdviceRecommendations(profile, key);
+    if (!recommendations) return;
+
+    state.adviceWindowKey = key;
+    renderAssistantWindowAnswer(recommendations);
   }
 
   function renderDailyForecast(daily) {
@@ -2674,6 +2917,40 @@
           elements.refreshBtn.classList.remove('is-loading');
           elements.refreshBtn.disabled = false;
         });
+      });
+    }
+
+    // "Rain during your ...?" window selector (delegated: the tabs are
+    // re-created on every render, so the listener lives on the container)
+    if (elements.assistantWindowTabs) {
+      elements.assistantWindowTabs.addEventListener('click', (e) => {
+        const tab = e.target.closest('.assistant-window-tab');
+        if (!tab || !tab.dataset.windowKey) return;
+        onAssistantWindowChange(tab.dataset.windowKey);
+      });
+
+      // Arrow-key navigation, matching the °C/°F radiogroup behaviour.
+      elements.assistantWindowTabs.addEventListener('keydown', (e) => {
+        const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', ' ', 'Enter'];
+        if (!keys.includes(e.key)) return;
+        const tab = e.target.closest('.assistant-window-tab');
+        if (!tab) return;
+        e.preventDefault();
+
+        const tabs = Array.from(
+          elements.assistantWindowTabs.querySelectorAll('.assistant-window-tab')
+        );
+        const index = tabs.indexOf(tab);
+        if (index === -1) return;
+
+        // Right/Down move forward, Left/Up move back, and both wrap around.
+        const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1;
+        const next = tabs[(index + step + tabs.length) % tabs.length];
+        if (e.key === 'Enter' || e.key === ' ') {
+          onAssistantWindowChange(next.dataset.windowKey);
+          return;
+        }
+        onAssistantWindowChange(next.dataset.windowKey);
       });
     }
 

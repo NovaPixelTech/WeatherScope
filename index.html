@@ -330,6 +330,35 @@
           </div>
         </section>
 
+        <!-- Personal Weather Assistant -->
+        <section class="card assistant-card" id="assistant-card" aria-labelledby="assistant-heading" hidden>
+          <div class="assistant-header">
+            <h2 class="card-section-title" id="assistant-heading">Today's advice</h2>
+            <p class="card-subtitle assistant-scope" id="assistant-scope">Based on the hourly forecast</p>
+          </div>
+
+          <!-- Headline recommendation (the single most useful sentence) -->
+          <div class="assistant-summary" id="assistant-summary" role="status" aria-live="polite">
+            <span class="assistant-summary-icon" id="assistant-summary-icon" aria-hidden="true"></span>
+            <div class="assistant-summary-text">
+              <p class="assistant-summary-headline" id="assistant-summary-headline">Preparing your forecast&hellip;</p>
+              <p class="assistant-summary-detail" id="assistant-summary-detail"></p>
+            </div>
+          </div>
+
+          <!-- Recommendation tiles -->
+          <div class="assistant-grid" id="assistant-grid" role="list"></div>
+
+          <!-- "Rain during your ...?" time-window selector -->
+          <div class="assistant-window">
+            <div class="assistant-window-head">
+              <h3 class="assistant-window-title" id="assistant-window-title">Rain during your&hellip;?</h3>
+              <div class="assistant-window-tabs" id="assistant-window-tabs" role="radiogroup" aria-labelledby="assistant-window-title"></div>
+            </div>
+            <p class="assistant-window-answer" id="assistant-window-answer" role="status" aria-live="polite"></p>
+          </div>
+        </section>
+
         <!-- Condition Metrics Grid -->
         <section class="card metrics-card" aria-label="Key Weather Metrics">
           <h2 class="card-section-title">Current Conditions</h2>
@@ -519,6 +548,9 @@
     </footer>
   </div>
 
+  <!-- Pure forecast logic, no DOM access: loaded before the app so the
+       dashboard can render recommendations from data it already has. -->
+  <script src="advice.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
