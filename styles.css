@@ -1014,11 +1014,310 @@ body {
   font-weight: 600;
 }
 
+/* ==========================================================================
+   Live Clocks
+   --------------------------------------------------------------------------
+   Shared tokens for every ticking surface: the hero readout, the "Local Time"
+   metric card, the visitor's header clock, the climate grid cards and the
+   autocomplete rows. Seconds are dimmer than hours/minutes so the eye tracks
+   the ticking digit rather than the whole string.
+
+   Accessibility note: per-second nodes carry aria-hidden="true" (set by app.js)
+   because they sit inside <main aria-live="polite"> and would otherwise be
+   announced sixty times a minute. The non-volatile siblings - date, zone
+   abbreviation and the offset versus the visitor - stay exposed to AT.
+   ========================================================================== */
+.clock-digits,
+.clock-seconds,
+.clock-metric-value,
+.user-clock-time,
+.city-result-clock,
+.autocomplete-item-clock {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* --- Hero: city clock --------------------------------------------------- */
 .local-time {
-  font-size: 0.9rem;
-  color: var(--text-muted);
-  margin-top: 4px;
+  margin-top: 10px;
   font-weight: 500;
+}
+
+.local-time-clock {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: #ffffff;
+}
+
+.local-time-icon {
+  width: 16px;
+  height: 16px;
+  align-self: center;
+  color: var(--accent-cyan);
+  flex-shrink: 0;
+}
+
+.clock-digits {
+  font-size: 1.85rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.clock-seconds {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  opacity: 0.9;
+  line-height: 1.1;
+}
+
+.clock-zone {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+  align-self: center;
+}
+
+.local-time-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 3px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.local-time-date {
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.local-time-diff {
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+
+.local-time-diff.is-same {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* One-shot pulse applied by app.js whenever the seconds digit changes. */
+@keyframes clockSecondTick {
+  0% {
+    opacity: 0.35;
+    transform: translateY(-1px);
+  }
+  100% {
+    opacity: 0.9;
+    transform: translateY(0);
+  }
+}
+
+.clock-seconds.tick,
+.city-result-clock-seconds.tick {
+  animation: clockSecondTick 0.35s ease-out;
+}
+
+/* --- Header: the visitor's own clock ----------------------------------- */
+.user-clock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 10px;
+  background: rgba(11, 19, 36, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius-full);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.user-clock-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--accent-emerald);
+  flex-shrink: 0;
+}
+
+.user-clock-body {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.user-clock-time {
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.user-clock-zone {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 15ch;
+}
+
+/* --- Metrics grid: "Local Time" card ------------------------------------ */
+.clock-icon {
+  color: var(--accent-cyan);
+  background: rgba(56, 189, 248, 0.22);
+}
+
+.clock-metric-value {
+  font-size: 1.65rem;
+  letter-spacing: -0.02em;
+}
+
+.offset-pills {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.offset-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.offset-pill-main {
+  color: #0b1324;
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+}
+
+.offset-pill-main.is-same {
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--text-muted);
+}
+
+.offset-pill-sub {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Climate result cards ----------------------------------------------- */
+.city-result-time {
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.city-result-clock {
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  line-height: 1.1;
+}
+
+.city-result-clock-seconds {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.city-result-timezone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.city-result-timezone-abbr {
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.city-result-timezone-diff {
+  color: var(--accent-cyan);
+  font-weight: 700;
+  text-align: right;
+}
+
+.city-result-timezone-diff.is-same {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* --- Autocomplete rows --------------------------------------------------- */
+.autocomplete-item-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-left: 10px;
+  flex-shrink: 0;
+}
+
+.autocomplete-item-clock {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--accent-cyan);
+  white-space: nowrap;
+}
+
+.autocomplete-item-offset {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.12);
+  white-space: nowrap;
+}
+
+.autocomplete-item-offset.is-same {
+  color: var(--text-muted);
+}
+
+.tz-label {
+  color: var(--accent-cyan);
+  font-weight: 700;
+}
+
+.footer-timezone-note {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-top: 4px;
 }
 
 .data-freshness {
@@ -1709,6 +2008,16 @@ body {
   .climate-results-grid {
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   }
+
+  /* The header clock and the unit toggle share one row; let the clock shrink
+     before the toggle is pushed off-screen. */
+  .user-clock {
+    min-width: 0;
+  }
+
+  .user-clock-zone {
+    max-width: 10ch;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1719,6 +2028,59 @@ body {
 
   .header-controls {
     justify-content: flex-end;
+  }
+
+  .user-clock {
+    padding: 4px 10px 4px 8px;
+    gap: 6px;
+  }
+
+  .user-clock-icon {
+    display: none;
+  }
+
+  .user-clock-time {
+    font-size: 0.84rem;
+  }
+
+  .user-clock-zone {
+    max-width: 12ch;
+  }
+
+  /* Keep the hero clock on one line and shrink the digits rather than wrap. */
+  .local-time-clock {
+    flex-wrap: wrap;
+  }
+
+  .clock-digits {
+    font-size: 1.6rem;
+  }
+
+  .city-result-clock {
+    font-size: 1.05rem;
+  }
+
+  .city-result-timezone {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .city-result-timezone-diff {
+    text-align: left;
+  }
+
+  /* Autocomplete rows gain a clock, so let the name/meta column truncate
+     instead of pushing the clock off the dropdown. */
+  .autocomplete-item {
+    gap: 10px;
+  }
+
+  .autocomplete-item-meta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .search-section {

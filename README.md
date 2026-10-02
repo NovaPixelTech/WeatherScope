@@ -40,6 +40,7 @@ Powered by the [Open-Meteo API](https://open-meteo.com/), SkyCast operates with 
   - Atmospheric pressure in hPa with high/low pressure indications.
   - Real-time rainfall accumulation and cloud cover %.
   - Local sunrise and sunset times.
+  - **Local Time** card: the city's live clock, its UTC offset, how far it sits from *your* clock, and your own time for direct comparison.
 - **24-Hour Forecast**: Scrollable horizontal strip with hourly temperatures and precipitation probabilities.
 - **7-Day Extended Forecast**: Daily outlook with normalized min/max temperature range bars, plus per-day max UV index and chance of precipitation.
 - **Instant Unit Switching**: Toggle between Celsius (**°C**) and Fahrenheit (**°F**) with instantaneous client-side recalculation. Temperature, wind (km/h ↔ mph), and precipitation (mm ↔ in) all follow the toggle, and the choice is remembered in `localStorage`.
@@ -49,12 +50,47 @@ Powered by the [Open-Meteo API](https://open-meteo.com/), SkyCast operates with 
 
 ---
 
+## 🕐 Live local time & time-zone difference
+
+Every surface that shows a city's climate information also shows that city's **live local clock**, ticking in real time down to the second, plus **how far that city is from the time zone you are in**.
+
+| Surface | What it shows |
+| --- | --- |
+| **Header** (always visible) | *Your* clock and detected zone — the reference point for every difference below. |
+| **Hero card** | Large city clock `HH:MM` + dimmed pulsing `:SS`, zone abbreviation (`CEST`, `PDT`, `GMT+5:30`), full date, and *"7h ahead of you"*. |
+| **Current Conditions → Local Time** | City clock `HH:MM:SS`, date, offset pill (`+5h30m · UTC+05:30`) and your own clock side by side. |
+| **Climate results grid** | Every matching city card carries its own live clock, zone abbreviation and offset — e.g. 36 cities across 17 time zones ticking at once. |
+| **Search suggestions** | Each suggestion shows the candidate city's local time and compact offset, which also disambiguates same-named cities (*Paris, France* vs *Paris, Texas*). |
+| **Forecast headers** | The 24-hour and 7-day cards label which zone their hour labels are in. |
+| **Footer** | Discloses which timezone was detected for your reference clock. |
+
+### How "your" time zone is determined
+
+Your timezone comes from `Intl.DateTimeFormat().resolvedOptions().timeZone`, i.e. the timezone your device/OS reports. That is the same zone an IP-geolocation lookup would resolve for your connection, but it needs **no third-party API key, no extra network request, and cannot rate-limit or fail** — so the feature works offline from the API's perspective and adds zero dependencies.
+
+### Why the clocks stay correct
+
+- **Offsets come from `Intl`, not from hand-rolled arithmetic.** DST transitions, half-hour zones (`Asia/Kolkata`, +05:30) and quarter-hour zones (`Australia/Eucla`, +08:45) are all handled by the platform's own timezone database, with no bundled tz data.
+- **One shared timer drives every clock.** N clocks cost one timer, not N.
+- **The timer re-arms on the next second boundary** (`1000 - Date.now() % 1000`) rather than every 1000 ms, so the display cannot drift, skip, or repeat a second over a long session.
+- **Formatters are cached per zone**, because constructing an `Intl.DateTimeFormat` is far more expensive than calling one. Each zone costs exactly one `formatToParts` call per tick; the `HH:MM:SS` digits are then plain arithmetic.
+- **Hidden views are gated off** by their existing `.hidden` class rather than by probing layout — `offsetParent` / `getClientRects()` force synchronous reflows, which would mean hundreds of reflows per second with a full 72-card grid on screen.
+- **Work is skipped entirely while the tab is hidden**, so returning to the tab never triggers a burst of stale frames.
+- **Registrations are released** when a card leaves the result set, when the grid empties, and when the suggestion dropdown closes or rebuilds — so repeated searching cannot accumulate clocks.
+
+### Accessibility of the ticking digits
+
+The dashboard, climate grid and suggestion dropdown all live inside `<main aria-live="polite">`. A per-second text change in a polite live region becomes a screen-reader announcement, so every node that rewrites itself each second carries `aria-hidden="true"`; a screen reader would otherwise try to speak the clock sixty times a minute. The meaningful, non-volatile facts stay exposed: the date, the zone abbreviation, and the offset versus you — including in each city card's `aria-label`. The seconds pulse animation is also disabled under `prefers-reduced-motion`.
+
+---
+
 ## ♿ Accessibility
 
 - Search field is a proper `role="combobox"` with `aria-expanded`, `aria-controls`, and `aria-activedescendant` wired to a `role="listbox"`.
 - Full keyboard support in the suggestion list: **↑ / ↓** to move (wrapping), **Enter** to select, **Esc** to dismiss, **Tab** to move on. Hovering an option also highlights it.
 - Ambiguous city names (e.g. *Paris*) open a disambiguation list instead of silently loading the top-ranked match.
 - Live regions: loading uses `role="status"`, errors use `role="alert"`, and the main content area is an `aria-live` tab panel.
+- **Ticking clocks are `aria-hidden`** so their per-second updates are not announced as live-region changes; each city card and suggestion instead exposes its zone and its offset versus you through a stable `aria-label`. See [Live local time](#%EF%B8%8F-live-local-time--time-zone-difference).
 - Mode tabs, the °C/°F radiogroup, and 7-day rows all carry the ARIA roles and states their patterns require.
 - A `<noscript>` notice explains that JavaScript is required.
 

@@ -103,6 +103,20 @@
       </div>
 
       <div class="header-controls">
+        <!-- Visitor reference clock: the "your side" of every time difference shown below -->
+        <div class="user-clock" id="user-clock">
+          <svg class="user-clock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <polyline points="12 7 12 12 15.5 14" />
+          </svg>
+          <span class="user-clock-body">
+            <!-- The digits are per-second volatile, so they are hidden from AT;
+                 the non-volatile zone name below carries the accessible meaning. -->
+            <span class="user-clock-time" id="user-clock-time" aria-hidden="true">--:--:--</span>
+            <span class="user-clock-zone" id="user-clock-zone">Your time</span>
+          </span>
+        </div>
+
         <div class="unit-toggle" role="radiogroup" aria-label="Temperature unit selection">
           <button type="button" class="unit-btn active" data-unit="celsius" id="unit-c" role="radio" aria-checked="true">°C</button>
           <button type="button" class="unit-btn" data-unit="fahrenheit" id="unit-f" role="radio" aria-checked="false">°F</button>
@@ -253,7 +267,24 @@
             <div class="location-details">
               <h1 class="city-name" id="city-name">Paris</h1>
               <p class="location-meta" id="location-meta">Île-de-France, France</p>
-              <p class="local-time" id="local-time">Saturday, Sep 26 • 16:30</p>
+
+              <!-- Live local-time readout for the selected city (seconds tick in real time) -->
+              <div class="local-time" id="local-time">
+                <div class="local-time-clock">
+                  <svg class="local-time-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" />
+                    <polyline points="12 7 12 12 15.5 14" />
+                  </svg>
+                  <span class="clock-digits" id="city-clock" aria-hidden="true">--:--:--</span>
+                  <span class="clock-seconds" id="city-clock-seconds" aria-hidden="true">--</span>
+                  <span class="clock-zone" id="city-clock-zone">UTC</span>
+                </div>
+                <div class="local-time-meta">
+                  <span class="local-time-date" id="local-time-date">Saturday, Sep 26</span>
+                  <span class="local-time-diff" id="city-time-diff">Same time as you</span>
+                </div>
+              </div>
+
               <p class="data-freshness" id="data-freshness" hidden></p>
             </div>
             <div class="condition-badge" id="condition-badge">
@@ -405,6 +436,27 @@
               <p class="metric-status" id="cloud-cover-status">Cloud cover: 18%</p>
             </div>
 
+            <!-- Local Time & Offset From You -->
+            <div class="metric-box">
+              <div class="metric-header">
+                <div class="metric-icon clock-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="9" />
+                    <polyline points="12 7 12 12 15.5 14" />
+                  </svg>
+                </div>
+                <span class="metric-title">Local Time</span>
+              </div>
+              <div class="metric-value-row">
+                <span class="metric-value clock-metric-value" id="metric-city-clock">--:--:--</span>
+              </div>
+              <p class="metric-status" id="metric-city-date">--</p>
+              <div class="offset-pills">
+                <span class="offset-pill offset-pill-main" id="metric-city-offset">--</span>
+                <span class="offset-pill offset-pill-sub" id="metric-user-time">You --:--:--</span>
+              </div>
+            </div>
+
             <!-- Sun Times -->
             <div class="metric-box sun-metric-box">
               <div class="metric-header">
@@ -440,7 +492,7 @@
         <section class="card hourly-card">
           <div class="card-header-row">
             <h2 class="card-section-title">24-Hour Forecast</h2>
-            <span class="card-subtitle">Local hourly projection</span>
+            <span class="card-subtitle">Local hourly projection &middot; <span class="tz-label" id="hourly-tz-label">city time</span></span>
           </div>
           <div class="hourly-strip" id="hourly-strip" role="region" aria-label="Hourly weather forecast">
             <!-- Hourly cards injected via JavaScript -->
@@ -451,7 +503,7 @@
         <section class="card daily-card">
           <div class="card-header-row">
             <h2 class="card-section-title">7-Day Forecast</h2>
-            <span class="card-subtitle">Upcoming outlook</span>
+            <span class="card-subtitle">Upcoming outlook &middot; <span class="tz-label" id="daily-tz-label">city time</span></span>
           </div>
           <div class="daily-list" id="daily-list" role="list">
             <!-- Daily rows injected via JavaScript -->
@@ -462,7 +514,8 @@
 
     <!-- Footer -->
     <footer class="app-footer">
-      <p>Data provided by <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo API</a> • Real-time global meteorological intelligence</p>
+      <p>Data provided by <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo API</a> &bull; Real-time global meteorological intelligence</p>
+      <p class="footer-timezone-note">Local times use each city's IANA timezone and tick in real time &middot; Your reference time is detected from your device timezone (<span id="footer-user-zone">--</span>)</p>
     </footer>
   </div>
 

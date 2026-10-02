@@ -152,6 +152,410 @@
   const REQUEST_TIMEOUT = 12000;
 
   // ==========================================================================
+  // Time Engine
+  // --------------------------------------------------------------------------
+  // One shared ticker drives every clock on the page so N city clocks cost one
+  // timer, not N. Design notes:
+  //
+  //  * Offsets come from Intl, not from arithmetic on the raw UTC clock, so DST
+  //    transitions (including half-hour zones like Asia/Kolkata and zones that
+  //    skip an hour) are always correct without a tz database of our own.
+  //  * Each zone needs exactly one `formatToParts` call per tick; the wall-clock
+  //    H:M:S is then plain arithmetic on the returned UTC offset. With 72 city
+  //    cards ticking that is ~72 Intl calls/second, and Intl instances are
+  //    cached per zone because constructing one is far more expensive than
+  //    calling one.
+  //  * The ticker re-arms on the next second boundary rather than every 1000ms,
+  //    so the display cannot drift away from the real second.
+  //  * Seconds are only rewritten when they actually change, which keeps the
+  //    pulse animation from re-triggering on cards that are off-screen.
+  // ==========================================================================
+  const TICK_MS = 1000;
+
+  /**
+   * The visitor's own timezone. The browser derives this from the operating
+   * system's locale data, which is the same timezone an IP geolocation lookup
+   * would return for the connection - but it costs no network round-trip, needs
+   * no third-party API key, and cannot rate-limit us.
+   */
+  const USER_TIME_ZONE = (() => {
+    try {
+      const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      // Validate before trusting it: an unknown zone throws in formatToParts.
+      if (detected) {
+        new Intl.DateTimeFormat('en-US', { timeZone: detected }).format(new Date());
+        return detected;
+      }
+    } catch (err) {
+      console.warn('Timezone detection failed, falling back to UTC', err);
+    }
+    return 'UTC';
+  })();
+
+  /** Intl instances are expensive to build, so keep one per (zone, option set). */
+  const formatterCache = new Map();
+
+  function getFormatter(timeZone, options) {
+    const key = `${timeZone}|${JSON.stringify(options)}`;
+    let formatter = formatterCache.get(key);
+    if (!formatter) {
+      try {
+        formatter = new Intl.DateTimeFormat('en-US', { ...options, timeZone });
+      } catch (err) {
+        // Unknown zone id: degrade to UTC rather than breaking the whole clock.
+        formatter = new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'UTC' });
+      }
+      formatterCache.set(key, formatter);
+    }
+    return formatter;
+  }
+
+  /**
+   * Minutes to add to UTC for `timeZone` at `date` (e.g. 330 for Asia/Kolkata,
+   * -300 for America/New_York in summer).
+   */
+  function getZoneOffsetMinutes(timeZone, date) {
+    const parts = getFormatter(timeZone, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(date);
+
+    let year = 0;
+    let month = 1;
+    let day = 1;
+    let hour = 0;
+    let minute = 0;
+    let second = 0;
+
+    parts.forEach((part) => {
+      if (part.type === 'year') year = +part.value;
+      else if (part.type === 'month') month = +part.value;
+      else if (part.type === 'day') day = +part.value;
+      else if (part.type === 'hour') hour = +part.value;
+      else if (part.type === 'minute') minute = +part.value;
+      else if (part.type === 'second') second = +part.value;
+    });
+
+    // Some engines render midnight as hour "24" in hourCycle h23 formats.
+    const wall = Date.UTC(year, month - 1, day, hour % 24, minute, second);
+    return Math.round((wall - date.getTime()) / 60000);
+  }
+
+  function pad2(value) {
+    return String(value).padStart(2, '0');
+  }
+
+  /** Wall-clock fields for a zone, derived arithmetically from its offset. */
+  function getZonedParts(timeZone, date) {
+    const offsetMinutes = getZoneOffsetMinutes(timeZone, date);
+    const shifted = new Date(date.getTime() + offsetMinutes * 60000);
+    return {
+      offsetMinutes,
+      hour: shifted.getUTCHours(),
+      minute: shifted.getUTCMinutes(),
+      second: shifted.getUTCSeconds(),
+    };
+  }
+
+  /** "14:05:09" */
+  function formatClock(timeZone, date) {
+    const parts = getZonedParts(timeZone, date);
+    return `${pad2(parts.hour)}:${pad2(parts.minute)}:${pad2(parts.second)}`;
+  }
+
+  /** "Saturday, Sep 26" */
+  function formatZonedDate(timeZone, date) {
+    return getFormatter(timeZone, {
+      weekday: 'long',
+      month: 'short',
+      day: 'numeric',
+    }).format(date);
+  }
+
+  /** Short zone label such as "GMT+2" or "PDT". */
+  function getZoneAbbreviation(timeZone, date) {
+    const parts = getFormatter(timeZone, {
+      timeZoneName: 'short',
+      hour: 'numeric',
+    }).formatToParts(date);
+
+    const zonePart = parts.find((part) => part.type === 'timeZoneName');
+    return zonePart ? zonePart.value : timeZone;
+  }
+
+  /** "UTC offset" like "UTC+02:00" / "UTC-05:30" - always sign-explicit. */
+  function formatOffsetLabel(timeZone, date) {
+    const offsetMinutes = getZoneOffsetMinutes(timeZone, date);
+    const sign = offsetMinutes < 0 ? '-' : '+';
+    const abs = Math.abs(offsetMinutes);
+    return `UTC${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`;
+  }
+
+  /**
+   * How far ahead/behind a city is relative to the visitor, in minutes.
+   * Negative = city is behind the visitor.
+   */
+  function getOffsetDiffMinutes(timeZone, date) {
+    return getZoneOffsetMinutes(timeZone, date) - getZoneOffsetMinutes(USER_TIME_ZONE, date);
+  }
+
+  /**
+   * Human phrasing for the visitor-facing difference, e.g.
+   * "Same time as you" / "5h 30m ahead of you" / "3h behind you".
+   */
+  function describeTimeDifference(timeZone, date) {
+    const diff = getOffsetDiffMinutes(timeZone, date);
+    if (diff === 0) return 'Same time as you';
+
+    const ahead = diff > 0;
+    const abs = Math.abs(diff);
+    const hours = Math.floor(abs / 60);
+    const minutes = abs % 60;
+
+    let magnitude;
+    if (hours === 0) {
+      magnitude = `${minutes}m`;
+    } else if (minutes === 0) {
+      magnitude = `${hours}h`;
+    } else {
+      magnitude = `${hours}h ${minutes}m`;
+    }
+
+    return `${magnitude} ${ahead ? 'ahead of' : 'behind'} you`;
+  }
+
+  /** Compact form for tight spaces, e.g. "+5h30m" / "Same". */
+  function formatOffsetDiffCompact(timeZone, date) {
+    const diff = getOffsetDiffMinutes(timeZone, date);
+    if (diff === 0) return 'Same time';
+
+    const sign = diff > 0 ? '+' : '-';
+    const abs = Math.abs(diff);
+    const hours = Math.floor(abs / 60);
+    const minutes = abs % 60;
+
+    if (hours === 0) return `${sign}${minutes}m`;
+    if (minutes === 0) return `${sign}${hours}h`;
+    return `${sign}${hours}h${minutes}m`;
+  }
+
+  /**
+   * Registry of ticking clock elements. Each entry owns a timezone plus the
+   * nodes it needs to refresh, so adding a clock surface anywhere in the app
+   * means registering it here and nothing else.
+   *
+   * `isVisible` is a cheap, layout-free predicate evaluated once per clock per
+   * tick. Layout probes (offsetParent / getClientRects) are deliberately avoided
+   * here: they force a synchronous reflow, and with 72 city cards ticking that
+   * would mean hundreds of reflows every second. The app already tracks which
+   * view is on screen via its `.hidden` toggles, so those make the gate exact.
+   */
+  const clockRegistry = new Map();
+  let clockRegistrySeq = 0;
+
+  /**
+   * Hide a node that rewrites itself every second from assistive technology.
+   *
+   * The dashboard, the climate grid and the search dropdown all sit inside
+   * `<main aria-live="polite">`. Without this, each clock tick would be queued
+   * as a live-region announcement - a screen reader would try to speak the city
+   * clock sixty times a minute. So the per-second digits are hidden and the
+   * meaningful, non-volatile facts (date, zone, offset from the visitor) are
+   * carried by sibling text that changes at most once a day.
+   */
+  function hideVolatileNode(node) {
+    if (node) node.setAttribute('aria-hidden', 'true');
+    return node;
+  }
+
+  /**
+   * Register a clock surface. `targets` maps node -> render(timeZone, now) so
+   * each surface decides its own markup (hero, metric card, grid card, ...).
+   */
+  function registerClock(timeZone, targets, isVisible) {
+    const id = ++clockRegistrySeq;
+    clockRegistry.set(id, { timeZone, targets, isVisible });
+    return id;
+  }
+
+  function unregisterClock(id) {
+    clockRegistry.delete(id);
+  }
+
+  /** Re-run every registered clock against a single shared "now". */
+  function tickClocks(now) {
+    clockRegistry.forEach((clock) => {
+      if (clock.isVisible && !clock.isVisible()) return;
+
+      clock.targets.forEach((render, node) => {
+        // A cached node can outlive its container (the climate grid keeps
+        // evicted cards in a Map); a detached node has nothing to paint.
+        if (!node.isConnected) return;
+        render(clock.timeZone, now);
+      });
+    });
+  }
+
+  let clockTimer = null;
+
+  function startClockTicker() {
+    if (clockTimer !== null) return;
+
+    const run = () => {
+      // A backgrounded tab gets no rAF and its timers are throttled; skip the
+      // work rather than batch up a burst of stale frames on return.
+      if (document.hidden) {
+        clockTimer = setTimeout(run, TICK_MS);
+        return;
+      }
+
+      tickClocks(new Date());
+
+      // Re-arm on the next second boundary: 1000ms intervals accumulate drift
+      // and would eventually skip or repeat a second.
+      const delay = TICK_MS - (Date.now() % TICK_MS);
+      clockTimer = setTimeout(run, delay);
+    };
+
+    run();
+  }
+
+  /** Force an immediate repaint, e.g. right after a theme or unit switch. */
+  function refreshClocks() {
+    tickClocks(new Date());
+  }
+
+  /**
+   * Register the persistent "your local time" clock in the header. It always
+   * reads USER_TIME_ZONE, so it is registered exactly once at boot.
+   */
+  function registerUserClock() {
+    if (userClockId !== null) return;
+
+    if (elements.userClockZone) {
+      elements.userClockZone.textContent = getZoneAbbreviation(USER_TIME_ZONE, new Date());
+      elements.userClockZone.title = `Detected timezone: ${USER_TIME_ZONE}`;
+    }
+    if (elements.footerUserZone) {
+      elements.footerUserZone.textContent = USER_TIME_ZONE;
+    }
+
+    // The digits are hidden from AT (see hideVolatileNode), so name the control
+    // with a stable label instead - it changes at most when the zone changes.
+    if (elements.userClock) {
+      const label = `Your local time, detected from your timezone ${USER_TIME_ZONE}`;
+      elements.userClock.setAttribute('role', 'img');
+      elements.userClock.setAttribute('aria-label', label);
+      elements.userClock.setAttribute('title', label);
+    }
+
+    // The header clock is always on screen.
+    userClockId = registerClock(USER_TIME_ZONE, new Map([
+      [elements.userClockTime, (timeZone, now) => {
+        elements.userClockTime.textContent = formatClock(timeZone, now);
+      }],
+    ]));
+  }
+
+  /**
+   * Point every hero / metric / forecast-zone surface at a city's timezone.
+   * Re-registering on each city load is what makes switching cities switch the
+   * clocks, and unregistering first prevents stale renderers piling up.
+   */
+  function registerCityClocks(timeZone) {
+    if (heroClockId !== null) unregisterClock(heroClockId);
+
+    const targets = new Map();
+    const add = (node, render) => {
+      if (node) targets.set(node, render);
+    };
+    // Every node below that rewrites itself each second must be hidden from
+    // assistive tech; the date / zone / offset siblings stay exposed because
+    // they only change when the city or the calendar day changes.
+    const addVolatile = (node, render) => {
+      add(hideVolatileNode(node), render);
+    };
+
+    // --- Hero: big ticking clock, pulsing seconds, zone label, date, offset ---
+    addVolatile(elements.cityClock, (zone, now) => {
+      const parts = getZonedParts(zone, now);
+      elements.cityClock.textContent = `${pad2(parts.hour)}:${pad2(parts.minute)}`;
+    });
+
+    addVolatile(elements.cityClockSeconds, (zone, now) => {
+      const parts = getZonedParts(zone, now);
+      const seconds = pad2(parts.second);
+      if (elements.cityClockSeconds.textContent === seconds) return;
+      elements.cityClockSeconds.textContent = seconds;
+      // Restart the pulse so the digit visibly ticks.
+      elements.cityClockSeconds.classList.remove('tick');
+      void elements.cityClockSeconds.offsetWidth;
+      elements.cityClockSeconds.classList.add('tick');
+    });
+
+    add(elements.cityClockZone, (zone, now) => {
+      const label = getZoneAbbreviation(zone, now);
+      if (elements.cityClockZone.textContent === label) return;
+      elements.cityClockZone.textContent = label;
+      elements.cityClockZone.title = `${zone} - ${formatOffsetLabel(zone, now)}`;
+    });
+
+    add(elements.localTimeDate, (zone, now) => {
+      const label = formatZonedDate(zone, now);
+      if (elements.localTimeDate.textContent === label) return;
+      elements.localTimeDate.textContent = label;
+    });
+
+    add(elements.cityTimeDiff, (zone, now) => {
+      const label = describeTimeDifference(zone, now);
+      if (elements.cityTimeDiff.textContent === label) return;
+      elements.cityTimeDiff.textContent = label;
+      elements.cityTimeDiff.classList.toggle('is-same', label === 'Same time as you');
+    });
+
+    // --- Current Conditions metric card: clock, date, offset, your clock ---
+    addVolatile(elements.metricCityClock, (zone, now) => {
+      elements.metricCityClock.textContent = formatClock(zone, now);
+    });
+
+    add(elements.metricCityDate, (zone, now) => {
+      elements.metricCityDate.textContent = formatZonedDate(zone, now);
+    });
+
+    add(elements.metricCityOffset, (zone, now) => {
+      const label = `${formatOffsetDiffCompact(zone, now)} · ${formatOffsetLabel(zone, now)}`;
+      if (elements.metricCityOffset.textContent === label) return;
+      elements.metricCityOffset.textContent = label;
+      elements.metricCityOffset.title = describeTimeDifference(zone, now);
+      elements.metricCityOffset.classList.toggle('is-same', getOffsetDiffMinutes(zone, now) === 0);
+    });
+
+    addVolatile(elements.metricUserTime, (zone, now) => {
+      elements.metricUserTime.textContent = `You ${formatClock(USER_TIME_ZONE, now)}`;
+      elements.metricUserTime.title = `Your timezone: ${USER_TIME_ZONE}`;
+    });
+
+    // --- Forecast headers: remind the reader which clock the hours refer to ---
+    add(elements.hourlyTzLabel, (zone, now) => {
+      elements.hourlyTzLabel.textContent = getZoneAbbreviation(zone, now);
+      elements.hourlyTzLabel.title = `All times in ${zone}`;
+    });
+
+    add(elements.dailyTzLabel, (zone, now) => {
+      elements.dailyTzLabel.textContent = getZoneAbbreviation(zone, now);
+      elements.dailyTzLabel.title = `All times in ${zone}`;
+    });
+
+    heroClockId = registerClock(timeZone, targets, () =>
+      !elements.dashboard.classList.contains('hidden'));
+  }
+
+  // ==========================================================================
   // DOM Elements
   // ==========================================================================
   const elements = {
@@ -238,7 +642,29 @@
     // Freshness + refresh
     dataFreshness: document.getElementById('data-freshness'),
     refreshBtn: document.getElementById('refresh-btn'),
+
+    // Live clocks
+    cityClock: document.getElementById('city-clock'),
+    cityClockSeconds: document.getElementById('city-clock-seconds'),
+    cityClockZone: document.getElementById('city-clock-zone'),
+    localTimeDate: document.getElementById('local-time-date'),
+    cityTimeDiff: document.getElementById('city-time-diff'),
+    metricCityClock: document.getElementById('metric-city-clock'),
+    metricCityDate: document.getElementById('metric-city-date'),
+    metricCityOffset: document.getElementById('metric-city-offset'),
+    metricUserTime: document.getElementById('metric-user-time'),
+    userClockTime: document.getElementById('user-clock-time'),
+    userClockZone: document.getElementById('user-clock-zone'),
+    userClock: document.getElementById('user-clock'),
+    footerUserZone: document.getElementById('footer-user-zone'),
+    hourlyTzLabel: document.getElementById('hourly-tz-label'),
+    dailyTzLabel: document.getElementById('daily-tz-label'),
   };
+
+  // The hero's clock surfaces all read the selected city's timezone, so they are
+  // registered once per city load instead of being re-registered on every tick.
+  let heroClockId = null;
+  let userClockId = null;
 
   // ==========================================================================
   // WMO Weather Codes Mapping
@@ -1035,22 +1461,10 @@
     if (city.country) metaParts.push(city.country);
     elements.locationMeta.textContent = metaParts.join(', ');
 
-    // Local Time format based on city's timezone
-    try {
-      const nowOptions = {
-        timeZone: data.timezone || 'UTC',
-        weekday: 'long',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      };
-      const formattedDate = new Intl.DateTimeFormat('en-US', nowOptions).format(new Date());
-      elements.localTime.textContent = formattedDate;
-    } catch {
-      elements.localTime.textContent = current.time ? current.time.replace('T', ' ') : 'Live';
-    }
+    // Local time: hand the city's timezone to the Time Engine, which keeps the
+    // clock (and the offset against the visitor) live from here on.
+    const cityZone = data.timezone || city.timezone || 'UTC';
+    registerCityClocks(cityZone);
 
     // Weather Condition
     const condition = WMO_MAP[current.weather_code] || { label: 'Clear', icon: 'clear' };
@@ -1126,6 +1540,10 @@
     elements.errorState.classList.add('hidden');
     elements.climateResultsSection.classList.add('hidden');
     elements.dashboard.classList.remove('hidden');
+
+    // Paint the clocks now that the dashboard is actually visible, so the city
+    // never flashes placeholder digits for a second while the ticker waits.
+    refreshClocks();
 
     // Show Back Button if user came from climate search
     if (state.matchingCities.length > 0) {
@@ -1263,6 +1681,15 @@
         <h3 class="city-result-name" data-ref="name"></h3>
         <p class="city-result-country" data-ref="country"></p>
       </div>
+      <div class="city-result-time">
+        <span class="city-result-clock" data-ref="clock"></span>
+        <span class="city-result-clock-seconds" data-ref="clockSeconds"></span>
+      </div>
+    </div>
+
+    <div class="city-result-timezone">
+      <span class="city-result-timezone-abbr" data-ref="zoneAbbr"></span>
+      <span class="city-result-timezone-diff" data-ref="offsetDiff"></span>
     </div>
 
     <div class="city-result-middle">
@@ -1328,7 +1755,16 @@
         condition: card.querySelector('[data-ref="condition"]'),
         humidity: card.querySelector('[data-ref="humidity"]'),
         wind: card.querySelector('[data-ref="wind"]'),
+        clock: card.querySelector('[data-ref="clock"]'),
+        clockSeconds: card.querySelector('[data-ref="clockSeconds"]'),
+        zoneAbbr: card.querySelector('[data-ref="zoneAbbr"]'),
+        offsetDiff: card.querySelector('[data-ref="offsetDiff"]'),
       };
+
+      // Register this card's clock with the shared ticker. The zone is filled in
+      // by updateResultCard below; clockId lets us re-register (never duplicate)
+      // if the cached card is re-rendered for a different zone.
+      refs.clockId = null;
 
       const select = () => loadCityWeather(city);
       card.addEventListener('click', select);
@@ -1365,9 +1801,47 @@
     refs.temp.textContent = formatTemp(current.temperature_2m);
     refs.tempUnit.textContent = getTempUnitSymbol();
 
+    // --- Live local time for this city ---
+    const zone = city.timezone || 'UTC';
+    const now = new Date();
+
+    refs.zoneAbbr.textContent = getZoneAbbreviation(zone, now);
+    refs.zoneAbbr.title = `${zone} - ${formatOffsetLabel(zone, now)}`;
+
+    const isSameTime = getOffsetDiffMinutes(zone, now) === 0;
+    refs.offsetDiff.textContent = describeTimeDifference(zone, now);
+    refs.offsetDiff.title = `Offset vs you (${USER_TIME_ZONE}): ${formatOffsetDiffCompact(zone, now)}`;
+    refs.offsetDiff.classList.toggle('is-same', isSameTime);
+
+    // Seed the first frame synchronously so the card never shows a placeholder,
+    // then hand the card to the shared ticker for the per-second updates.
+    refs.clock.textContent = '00:00';
+    refs.clockSeconds.textContent = '00';
+
+    if (refs.clockId !== null) unregisterClock(refs.clockId);
+    refs.clockId = registerClock(zone, new Map([
+      [hideVolatileNode(refs.clock), (tz, tick) => {
+        const parts = getZonedParts(tz, tick);
+        refs.clock.textContent = `${pad2(parts.hour)}:${pad2(parts.minute)}`;
+      }],
+      [hideVolatileNode(refs.clockSeconds), (tz, tick) => {
+        const parts = getZonedParts(tz, tick);
+        const seconds = pad2(parts.second);
+        if (refs.clockSeconds.textContent === seconds) return;
+        refs.clockSeconds.textContent = seconds;
+        refs.clockSeconds.classList.remove('tick');
+        void refs.clockSeconds.offsetWidth;
+        refs.clockSeconds.classList.add('tick');
+      }],
+    ]), () => !elements.climateResultsSection.classList.contains('hidden'));
+
+    // Zone and offset siblings stay exposed to assistive tech - they only change
+    // on a city switch, not every second.
     refs.card.setAttribute(
       'aria-label',
-      `View weather for ${city.name}, ${city.country}. ${condition.label}, ${formatTemp(current.temperature_2m)}${getTempUnitSymbol()}.`
+      `View weather for ${city.name}, ${city.country}. ${condition.label}, ` +
+      `${formatTemp(current.temperature_2m)}${getTempUnitSymbol()}. ` +
+      `Local time zone ${zone}, ${describeTimeDifference(zone, now)}.`
     );
   }
 
@@ -1540,6 +2014,9 @@
     if (sorted.length === 0) {
       // Drop cached cards so a later match set rebuilds cleanly
       elements.climateResultsGrid.innerHTML = '';
+      state.resultCards.forEach((refs) => {
+        if (refs.clockId !== null) unregisterClock(refs.clockId);
+      });
       state.resultCards.clear();
 
       const empty = document.createElement('div');
@@ -1575,6 +2052,7 @@
       state.resultCards.forEach((refs, id) => {
         if (!liveIds.has(id)) {
           refs.card.remove();
+          if (refs.clockId !== null) unregisterClock(refs.clockId);
           state.resultCards.delete(id);
         }
       });
@@ -1720,10 +2198,19 @@
   // ==========================================================================
   // Autocomplete UI Handlers
   // ==========================================================================
+  /** Clock registrations owned by the current dropdown, cleared on every rebuild. */
+  let autocompleteClocks = [];
+
+  function clearAutocompleteClocks() {
+    autocompleteClocks.forEach((id) => unregisterClock(id));
+    autocompleteClocks = [];
+  }
+
   function closeAutocomplete() {
     elements.autocompleteList.classList.add('hidden');
     elements.autocompleteList.innerHTML = '';
     elements.autocompleteOptions = [];
+    clearAutocompleteClocks();
     state.activeOptionIndex = -1;
     elements.searchInput.setAttribute('aria-expanded', 'false');
     elements.searchInput.removeAttribute('aria-activedescendant');
@@ -1742,6 +2229,10 @@
 
     elements.autocompleteList.innerHTML = '';
     elements.autocompleteOptions = [];
+
+    // The dropdown is rebuilt on every keystroke, so drop the previous batch of
+    // clocks instead of letting orphaned registrations pile up in the registry.
+    clearAutocompleteClocks();
 
     results.forEach((city, idx) => {
       const item = document.createElement('div');
@@ -1765,6 +2256,30 @@
       item.appendChild(name);
       item.appendChild(meta);
 
+      // Local time helps disambiguate same-named cities (Paris, France vs
+      // Paris, Texas) and answers "what time is it there?" before committing.
+      const zone = city.timezone || 'UTC';
+      const now = new Date();
+      const localTime = document.createElement('span');
+      localTime.className = 'autocomplete-item-time';
+      localTime.title = `${zone} - ${describeTimeDifference(zone, now)}`;
+
+      const clock = document.createElement('span');
+      clock.className = 'autocomplete-item-clock';
+      clock.textContent = formatClock(zone, now);
+      // Per-second volatile: hidden so the polite live region around the
+      // dropdown is not spammed once a second.
+      hideVolatileNode(clock);
+      localTime.appendChild(clock);
+
+      const offset = document.createElement('span');
+      offset.className = 'autocomplete-item-offset';
+      offset.textContent = formatOffsetDiffCompact(zone, now);
+      if (getOffsetDiffMinutes(zone, now) === 0) offset.classList.add('is-same');
+      localTime.appendChild(offset);
+
+      item.appendChild(localTime);
+
       item.addEventListener('click', () => {
         closeAutocomplete();
         loadCityWeather(city);
@@ -1773,6 +2288,22 @@
 
       elements.autocompleteList.appendChild(item);
       elements.autocompleteOptions.push({ el: item, city });
+
+      autocompleteClocks.push(registerClock(zone, new Map([
+        [clock, (tz, tick) => {
+          clock.textContent = formatClock(tz, tick);
+        }],
+      ]), () => !elements.autocompleteList.classList.contains('hidden')));
+    });
+
+    // Each option carries a non-volatile accessible summary of its local time.
+    elements.autocompleteOptions.forEach(({ el, city }) => {
+      const zone = city.timezone || 'UTC';
+      el.setAttribute(
+        'aria-label',
+        `${city.name}, ${[city.admin1, city.country].filter(Boolean).join(', ')}. ` +
+        `Local time zone ${zone}, ${describeTimeDifference(zone, new Date())}.`
+      );
     });
 
     if (options.disambiguate) {
@@ -2198,6 +2729,11 @@
   // ==========================================================================
   function init() {
     setupEvents();
+
+    // Boot the shared ticker and the visitor's reference clock before any data
+    // arrives, so there is a clock on screen from the first paint.
+    registerUserClock();
+    startClockTicker();
 
     // Render the unit-aware thresholds on the preset chips before first paint
     refreshChipThresholds();
