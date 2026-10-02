@@ -2136,6 +2136,544 @@ body {
 }
 
 /* ==========================================================================
+   Compare Locations
+   ===========================================================================
+   One section, three surfaces: the location picker (built from the existing
+   chip/button language), the "at a glance" summary, and the comparison tables.
+   Everything reuses the existing design tokens, radii and card treatment, so
+   the feature reads as part of SkyCast rather than a second app.
+   ========================================================================== */
+.compare-section {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.compare-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.compare-locations-card .card-subtitle {
+  margin-top: 6px;
+}
+
+/* --- Location picker ------------------------------------------------------ */
+/* Four rows of `label | place | controls`. The label track is fixed so the
+   place chips line up, and it collapses under the chips on narrow screens. */
+.compare-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.compare-slot {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px 8px 14px;
+  background: rgba(11, 19, 36, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.compare-slot:focus-within {
+  border-color: var(--accent-cyan);
+  background: rgba(15, 25, 48, 0.7);
+}
+
+.compare-slot-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.compare-slot-place {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.compare-slot-place-icon {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(56, 189, 248, 0.16);
+  border-radius: 50%;
+  color: var(--accent-cyan);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.compare-slot-place-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Long city names ("Kuala Lumpur", "Sao Paulo") truncate instead of pushing the
+   row's control buttons off-screen. */
+.compare-slot-place-name,
+.compare-slot-place-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compare-slot-place-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.compare-slot-place-meta {
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.compare-slot-place:hover .compare-slot-place-name {
+  color: var(--accent-cyan);
+}
+
+.compare-slot-place:focus-visible,
+.compare-slot-btn:focus-visible,
+.compare-action-btn:focus-visible,
+.compare-retry-btn:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.compare-slot-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.compare-slot-btn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.compare-slot-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.compare-slot-btn:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
+.compare-slot-btn:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+}
+
+/* Placeholder row for an unused slot, so the 2-4 range is visible at a glance */
+.compare-slot-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.24);
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.compare-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+/* The picker rows are 30px tall, so the buttons shrink from the 48px header
+   height to sit comfortably beside them. */
+.compare-action-btn {
+  height: 40px;
+  padding: 0 16px;
+  font-size: 0.85rem;
+}
+
+.compare-action-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.compare-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.compare-notice {
+  margin-top: 12px;
+  min-height: 1.2em;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--accent-yellow);
+}
+
+.compare-notice:empty {
+  margin-top: 0;
+}
+
+.compare-loading-state {
+  min-height: 180px;
+  padding: 36px 24px;
+}
+
+/* --- "Weather at a glance" ------------------------------------------------ */
+.compare-insights {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.compare-insight {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(56, 189, 248, 0.09);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: var(--radius-md);
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.compare-insight::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  margin-top: 0.45em;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+}
+
+.compare-insight-empty {
+  padding: 10px 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.24);
+  border-radius: var(--radius-md);
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+/* --- Comparison tables ---------------------------------------------------- */
+/* The metric column is sticky, so a value always stays attached to its label
+   even when 3-4 city columns force the grid to scroll sideways. The cell
+   re-applies the card's own blur because a translucent sticky cell would let
+   the scrolled-under columns show through. */
+.compare-table-wrap {
+  margin-top: 16px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-md);
+}
+
+.compare-table-wrap:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.compare-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  /* One floor per city column keeps 4 locations readable; below 860px the
+     floor shrinks rather than letting the table stretch off-screen. */
+  --compare-col-min: 150px;
+  min-width: min(100%, calc(112px + var(--compare-col-min) * var(--compare-cols, 2)));
+}
+
+.compare-table th,
+.compare-table td {
+  padding: 12px 14px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.compare-table tbody tr:last-child th,
+.compare-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.compare-table thead th {
+  background: rgba(9, 16, 32, 0.85);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  min-width: var(--compare-col-min);
+  white-space: nowrap;
+}
+
+.compare-metric-head {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: 112px;
+  min-width: 112px;
+  background: rgba(9, 16, 32, 0.96);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.compare-metric-cell {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--card-bg);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.compare-metric-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.compare-metric-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.compare-value {
+  font-size: 1.02rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #ffffff;
+}
+
+/* Subtle, neutral emphasis on the extremes of a row: an accent bar and a
+   lightly tinted cell. Neither end is styled as good or bad - only the size of
+   the gap is asserted, never which side is preferable. */
+.compare-value[data-emphasis] {
+  box-shadow: inset 3px 0 0 var(--accent-cyan);
+  background: rgba(56, 189, 248, 0.09);
+  border-radius: 6px;
+}
+
+.compare-col-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.compare-col-icon {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+}
+
+.compare-col-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.compare-col-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.compare-col-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22ch;
+}
+
+.compare-col-meta {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 24ch;
+}
+
+/* --- Per-column clock ------------------------------------------------------ */
+/* Every column carries its own local time, the same vocabulary the hero, the
+   metric cards and the autocomplete dropdown already use. */
+.compare-col-clock {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.compare-col-clock-offset {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--accent-cyan);
+}
+
+.compare-col-clock-zone {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Per-column failure --------------------------------------------------- */
+/* One slow or failing city degrades to this cell; the rest of the comparison
+   stays fully usable. */
+.compare-col-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.compare-col-error-text {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--accent-orange);
+}
+
+.compare-retry-btn {
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 5px 12px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: var(--radius-full);
+  color: #ffffff;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.compare-retry-btn:hover {
+  background: rgba(56, 189, 248, 0.22);
+  border-color: var(--accent-cyan);
+}
+
+/* --- Narrow screens ------------------------------------------------------- */
+@media (max-width: 860px) {
+  .compare-table {
+    --compare-col-min: 128px;
+  }
+
+  .compare-table th,
+  .compare-table td {
+    padding: 10px 12px;
+  }
+
+  .compare-value {
+    font-size: 0.94rem;
+  }
+
+  .compare-metric-head,
+  .compare-metric-cell {
+    width: 96px;
+    min-width: 96px;
+    font-size: 0.78rem;
+  }
+
+  .compare-col-name,
+  .compare-col-meta {
+    max-width: 16ch;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Stack the picker rows: the place chip gets the full width and its control
+     buttons drop to their own line, so nothing is ever clipped. */
+  .compare-slot {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 8px;
+  }
+
+  .compare-slot-actions {
+    justify-content: flex-end;
+  }
+
+  .compare-actions .compare-action-btn {
+    flex: 1 1 auto;
+  }
+
+  .compare-table {
+    --compare-col-min: 116px;
+  }
+
+  .compare-table thead th {
+    white-space: normal;
+  }
+
+  .compare-col-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .compare-col-name,
+  .compare-col-meta {
+    max-width: 11ch;
+  }
+
+  .compare-locations-card {
+    padding: 20px 16px;
+  }
+}
+
+/* ==========================================================================
    State Cards (Loading & Error)
    ========================================================================== */
 .state-card {

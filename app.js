@@ -119,7 +119,7 @@
   // ==========================================================================
   const state = {
     unit: localStorage.getItem('skycast_unit') || 'celsius', // 'celsius' or 'fahrenheit'
-    searchMode: 'city', // 'city' or 'climate'
+    searchMode: 'city', // 'city', 'compare' or 'climate'
     currentCity: null,
     weatherData: null,
     debounceTimer: null,
@@ -141,6 +141,14 @@
     // no personal routine is persisted to storage.
     adviceWindowKey: 'morning',
     adviceCache: null,
+    // Compare Locations: the picked places (each `{ city, weather, error }`),
+    // plus the guard that supersedes a stale comparison request.
+    compareLocations: [],
+    // Slot currently being re-picked, or null. Re-picking reuses the existing
+    // search box rather than adding a second, parallel picker UI.
+    compareReplaceIndex: null,
+    compareSeq: 0,
+    compareController: null,
   };
 
   const THEME_CLASSES = [
@@ -575,6 +583,7 @@
     // Search Mode Tabs
     tabModeCity: document.getElementById('tab-mode-city'),
     tabModeClimate: document.getElementById('tab-mode-climate'),
+    tabModeCompare: document.getElementById('tab-mode-compare'),
 
     // Quick Select Bars
     quickCitiesContainer: document.getElementById('quick-cities-container'),
@@ -675,6 +684,25 @@
     assistantGrid: document.getElementById('assistant-grid'),
     assistantWindowTabs: document.getElementById('assistant-window-tabs'),
     assistantWindowAnswer: document.getElementById('assistant-window-answer'),
+
+    // Compare Locations
+    compareSection: document.getElementById('compare-section'),
+    mainContent: document.getElementById('main-content'),
+    compareCount: document.getElementById('compare-count'),
+    compareSlots: document.getElementById('compare-slots'),
+    compareAddBtn: document.getElementById('compare-add-btn'),
+    compareRunBtn: document.getElementById('compare-run-btn'),
+    compareClearBtn: document.getElementById('compare-clear-btn'),
+    compareNotice: document.getElementById('compare-notice'),
+    compareLoading: document.getElementById('compare-loading'),
+    compareLoadingText: document.getElementById('compare-loading-text'),
+    compareGlanceCard: document.getElementById('compare-glance-card'),
+    compareInsights: document.getElementById('compare-insights'),
+    compareCurrentCard: document.getElementById('compare-current-card'),
+    compareCurrentTable: document.getElementById('compare-current-table'),
+    compareForecastCard: document.getElementById('compare-forecast-card'),
+    compareForecastTable: document.getElementById('compare-forecast-table'),
+    compareFreshness: document.getElementById('compare-freshness'),
   };
 
   // The hero's clock surfaces all read the selected city's timezone, so they are
@@ -1099,8 +1127,55 @@
         'sunset',
         'uv_index_max',
         'precipitation_probability_max',
+        // Compare Locations renders today's peak wind from this one extra
+        // field, which also lets it reuse a dashboard payload verbatim instead
+        // of refetching a city the visitor is already looking at.
+        'wind_speed_10m_max',
       ].join(','),
       timezone: timezone,
+    });
+
+    return await fetchJson(`https://api.open-meteo.com/v1/forecast?${params.toString()}`, signal);
+  }
+
+  /**
+   * Weather payload for one location in a comparison.
+   *
+   * Same endpoint, same `fetchJson` timeout/abort plumbing and the same field
+   * names as `fetchWeatherData`, trimmed to what the comparison actually shows
+   * and limited to a single day - so the shared `toEntry()` shape in
+   * `compare.js` reads identically whichever payload a column came from.
+   */
+  async function fetchComparisonWeather(city, signal) {
+    const params = new URLSearchParams({
+      latitude: city.latitude,
+      longitude: city.longitude,
+      current: [
+        'temperature_2m',
+        'relative_humidity_2m',
+        'apparent_temperature',
+        'is_day',
+        'precipitation',
+        'weather_code',
+        'cloud_cover',
+        'wind_speed_10m',
+        'wind_direction_10m',
+        'uv_index',
+      ].join(','),
+      // Rain probability is an hourly product; the comparison reads the entry
+      // stamped with `current.time` instead of costing another request.
+      hourly: 'precipitation_probability',
+      daily: [
+        'temperature_2m_max',
+        'temperature_2m_min',
+        'sunrise',
+        'sunset',
+        'uv_index_max',
+        'precipitation_probability_max',
+        'wind_speed_10m_max',
+      ].join(','),
+      forecast_days: 1,
+      timezone: city.timezone || 'auto',
     });
 
     return await fetchJson(`https://api.open-meteo.com/v1/forecast?${params.toString()}`, signal);
@@ -1570,7 +1645,11 @@
     elements.loadingState.classList.add('hidden');
     elements.errorState.classList.add('hidden');
     elements.climateResultsSection.classList.add('hidden');
-    elements.dashboard.classList.remove('hidden');
+    // A city load can finish after the visitor has already switched to another
+    // mode - the default city starts loading on page load. Rendering the data
+    // is still right, but the dashboard must not be pushed over whichever
+    // surface is currently on screen.
+    if (state.searchMode !== 'compare') elements.dashboard.classList.remove('hidden');
 
     // Paint the clocks now that the dashboard is actually visible, so the city
     // never flashes placeholder digits for a second while the ticker waits.
@@ -2301,7 +2380,811 @@
       });
     }
 
-    elements.climateResultsSection.classList.remove('hidden');
+    // Respect the mode actually on screen: a climate search that lands after
+    // the visitor moved to Compare must not push its results over it.
+    if (state.searchMode !== 'compare') {
+      elements.climateResultsSection.classList.remove('hidden');
+    }
+  }
+
+  // ==========================================================================
+  // Compare Locations
+  // --------------------------------------------------------------------------
+  // A third mode alongside City Search and Climate Filter. It answers one
+  // question - "what's the weather like in these places, and how different are
+  // they?" - and deliberately stops there:
+  //
+  //   * the picker reuses the existing geocoding autocomplete and the existing
+  //     popular-city chips, so no new input control is introduced;
+  //   * the numbers come from the same Open-Meteo endpoint through the same
+  //     `fetchJson` timeout/abort plumbing, and a city already on the dashboard
+  //     reuses its payload instead of refetching;
+  //   * every value is rendered through the app's own unit formatters and its
+  //     single WMO_MAP, so the degC/degF toggle and the existing icons apply
+  //     here with no separate setting and no second condition mapping;
+  //   * `compare.js` owns the location list, the metric definitions, the
+  //     thresholds and the insight sentences - this layer only fetches and
+  //     paints.
+  // ==========================================================================
+
+  /** The engine, or null if the script failed to load. */
+  function compareEngine() {
+    return window.SkyCastCompare || null;
+  }
+
+  /** Slot captions: "Location A" ... "Location D". */
+  const COMPARE_SLOT_LABELS = ['A', 'B', 'C', 'D'];
+
+  // Picker row icons. Static markup, matching the inline 24px stroke style used
+  // elsewhere in the app; `compareIconButton` sets an accessible name on the
+  // button itself, so these stay aria-hidden by inheriting the button's label.
+  const ICON_ARROW_UP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+  const ICON_ARROW_DOWN = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>';
+  const ICON_TRASH = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>';
+  const ICON_CLOSE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+
+  /**
+   * Formatters handed to `compare.js`. Every one of them already follows the
+   * global degC/degF toggle, which is how the comparison stays unit-consistent
+   * with the dashboard without owning any unit logic of its own.
+   */
+  function compareFormat() {
+    const tempSymbol = getTempUnitSymbol();
+    const windSymbol = getWindUnitSymbol();
+
+    return {
+      temp: (value) => (value === null || value === undefined || isNaN(value) ? '--' : `${formatTemp(value)}${tempSymbol}`),
+      // A gap is shown in the active unit, so degF mode reports the Fahrenheit
+      // equivalent of the Celsius difference.
+      tempGap: (degC) => (degC === null || degC === undefined || isNaN(degC) ? '--' : `${formatTemp(degC)}${tempSymbol}`),
+      wind: (value) => (value === null || value === undefined || isNaN(value) ? '--' : `${formatWindSpeed(value)} ${windSymbol}`),
+      windGap: (kmh) => (kmh === null || kmh === undefined || isNaN(kmh) ? '--' : formatWindSpeed(kmh)),
+      precip: (value) => (value === null || value === undefined || isNaN(value) ? '--' : `${formatPrecip(value)} ${getPrecipUnitSymbol()}`),
+      percent: (value) => (value === null || value === undefined || isNaN(value) ? '--' : `${Math.round(value)}%`),
+      uv: (value) => (value === null || value === undefined || isNaN(value) ? '--' : Number(value).toFixed(1)),
+      windSymbol,
+      // The one place a WMO code becomes text: the app's existing mapping.
+      conditionLabel: (code) => {
+        if (code === null || code === undefined) return '--';
+        const info = WMO_MAP[code];
+        return info ? info.label : 'Clear';
+      },
+    };
+  }
+
+  /** "Athens, Greece" via the existing WMO/icon helpers, or a neutral glyph. */
+  function compareConditionIcon(entry) {
+    const code = entry && entry.current ? entry.current.weather_code : null;
+    const isDay = entry && entry.current && entry.current.is_day !== undefined ? entry.current.is_day : 1;
+    const info = WMO_MAP[code] || { icon: 'clear' };
+    return getWeatherSvg(info.icon, isDay);
+  }
+
+  // --- Selection ------------------------------------------------------------
+
+  function setCompareLocations(locations) {
+    state.compareLocations = locations;
+    renderCompareSection();
+  }
+
+  /**
+   * Add a place to the comparison, reporting the engine's refusal (duplicate /
+   * list full) in the polite notice region rather than failing silently.
+   *
+   * When a slot is mid-re-pick this replaces it in place instead of appending,
+   * which is what makes "replace a location" work through the one shared
+   * search box.
+   */
+  function addCompareLocation(city) {
+    const engine = compareEngine();
+    if (!engine || !city) return false;
+
+    const replacing = state.compareReplaceIndex;
+
+    if (replacing !== null) {
+      // The slot can vanish under us (removed while re-picking).
+      if (replacing < 0 || replacing >= state.compareLocations.length) {
+        state.compareReplaceIndex = null;
+        setCompareNotice('');
+        return false;
+      }
+
+      const current = state.compareLocations[replacing];
+      // Re-picking the place already in this slot is a no-op, not an error.
+      if (current && engine.isSameCity(current.city, city)) {
+        cancelCompareReplace();
+        return false;
+      }
+
+      // The new place must not collide with one of the *other* slots.
+      const collides = state.compareLocations.some(
+        (slot, index) => index !== replacing && engine.isSameCity(slot.city, city)
+      );
+      if (collides) {
+        setCompareNotice(`${city.name} is already in your comparison.`);
+        return false;
+      }
+
+      const replaced = engine.replaceLocation(state.compareLocations, replacing, city);
+      state.compareReplaceIndex = null;
+      setCompareNotice('');
+      setCompareLocations(replaced);
+      return true;
+    }
+
+    const result = engine.addLocation(state.compareLocations, city);
+    if (!result.added) {
+      setCompareNotice(
+        result.reason === 'duplicate'
+          ? `${city.name} is already in your comparison.`
+          : result.reason === 'full'
+            ? `You can compare up to ${engine.THRESHOLDS.maxLocations} locations. Remove one to add another.`
+            : 'That location could not be added to the comparison.'
+      );
+      return false;
+    }
+
+    setCompareNotice('');
+    setCompareLocations(result.locations);
+    return true;
+  }
+
+  /** Start re-picking the place in a slot. */
+  function beginCompareReplace(index) {
+    const slot = state.compareLocations[index];
+    if (!slot || !slot.city) return;
+
+    state.compareReplaceIndex = index;
+    setCompareNotice(
+      `Choosing a new location for Location ${COMPARE_SLOT_LABELS[index] || index + 1} (currently ${slot.city.name}). Press Escape to cancel.`
+    );
+    closeAutocomplete();
+    elements.searchInput.focus();
+    elements.searchInput.select();
+  }
+
+  /** Abandon a re-pick; the slot keeps whatever it already held. */
+  function cancelCompareReplace() {
+    if (state.compareReplaceIndex === null) return;
+    state.compareReplaceIndex = null;
+    setCompareNotice('');
+  }
+
+  function removeCompareLocation(index) {
+    const engine = compareEngine();
+    if (!engine) return;
+
+    setCompareNotice('');
+    state.compareReplaceIndex = null;
+    setCompareLocations(engine.removeLocation(state.compareLocations, index));
+  }
+
+  function moveCompareLocation(index, delta) {
+    const engine = compareEngine();
+    if (!engine) return;
+
+    setCompareLocations(engine.moveLocation(state.compareLocations, index, delta));
+  }
+
+  function clearCompareLocations() {
+    const engine = compareEngine();
+    if (!engine) return;
+
+    setCompareNotice('');
+    state.compareReplaceIndex = null;
+    abortComparison();
+    setCompareLocations(engine.clearLocations());
+  }
+
+  function setCompareNotice(message) {
+    if (elements.compareNotice) elements.compareNotice.textContent = message || '';
+  }
+
+  /**
+   * Resolve a typed query in compare mode.
+   *
+   * Mirrors `handleCitySearch`, including its disambiguation list, but adds the
+   * place instead of replacing the dashboard.
+   */
+  async function handleCompareSearch(query) {
+    try {
+      const cities = await searchCities(query);
+      if (!cities || cities.length === 0) {
+        setCompareNotice(`No results found for "${query}". Try a different spelling or add a country.`);
+        return;
+      }
+
+      if (cities.length > 1) {
+        showAutocomplete(cities, { disambiguate: true });
+        elements.autocompleteList.classList.remove('hidden');
+        elements.searchInput.focus();
+        return;
+      }
+
+      addCompareLocation(cities[0]);
+      resetCompareSearchInput();
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      console.error('Comparison search error:', err);
+      setCompareNotice(
+        /timed out/i.test(err.message || '')
+          ? 'The location search timed out. Check your connection and try again.'
+          : 'The location search failed. Please try again.'
+      );
+    }
+  }
+
+  /** Clear the search box after a place has been committed to a slot. */
+  function resetCompareSearchInput() {
+    elements.searchInput.value = '';
+    elements.clearBtn.classList.add('hidden');
+  }
+
+  // --- Data fetching --------------------------------------------------------
+
+  /**
+   * Weather for one comparison column.
+   *
+   * A city the visitor is already looking at on the dashboard reuses that
+   * payload verbatim - no second request for data we already hold.
+   */
+  async function fetchCompareColumn(city, signal) {
+    if (
+      state.currentCity &&
+      state.weatherData &&
+      compareEngine() &&
+      compareEngine().isSameCity(state.currentCity, city)
+    ) {
+      return state.weatherData;
+    }
+    return fetchComparisonWeather(city, signal);
+  }
+
+  function abortComparison() {
+    if (state.compareController) state.compareController.abort();
+    state.compareController = null;
+  }
+
+  /**
+   * Fetch every selected location in parallel and paint the result.
+   *
+   * `Promise.allSettled` is deliberate: one timeout or one network error must
+   * degrade that single column to a retry affordance, never blank the whole
+   * comparison. `retryIndex` re-fetches exactly one column.
+   */
+  async function loadComparisonWeather(options = {}) {
+    const engine = compareEngine();
+    const locations = state.compareLocations;
+    if (!engine || !engine.canCompare(locations)) {
+      renderCompareSection();
+      return;
+    }
+
+    const targets = options.retryIndex === undefined
+      ? locations.map((_, index) => index)
+      : [options.retryIndex];
+    const isRetry = options.retryIndex !== undefined;
+
+    if (!isRetry) abortComparison();
+    const controller = new AbortController();
+    if (!isRetry) state.compareController = controller;
+    const seq = ++state.compareSeq;
+
+    // Clear the previously fetched data for the columns being refetched, so a
+    // retry shows the loading state instead of stale numbers.
+    const pending = state.compareLocations.map((slot, index) =>
+      targets.includes(index) ? { ...slot, weather: null, error: null } : slot
+    );
+    setCompareLocations(pending);
+
+    elements.compareLoadingText.textContent = isRetry
+      ? `Retrying ${locations[options.retryIndex].city.name}...`
+      : `Comparing weather in ${locations.length} locations...`;
+    elements.compareLoading.classList.remove('hidden');
+    elements.mainContent.setAttribute('aria-busy', 'true');
+
+    const results = await Promise.allSettled(
+      targets.map((index) => fetchCompareColumn(locations[index].city, controller.signal))
+    );
+
+    // A newer comparison superseded this one while the requests were in flight.
+    if (seq !== state.compareSeq) return;
+
+    const settled = state.compareLocations.map((slot, index) => {
+      const position = targets.indexOf(index);
+      if (position === -1) return slot;
+      const result = results[position];
+      if (result.status === 'fulfilled') {
+        return { ...slot, weather: result.value, error: null };
+      }
+      if (result.reason && result.reason.name === 'AbortError') return slot;
+      return {
+        ...slot,
+        weather: null,
+        error: /timed out/i.test((result.reason && result.reason.message) || '')
+          ? 'Request timed out after 12 seconds'
+          : 'Weather data unavailable',
+      };
+    });
+
+    elements.compareLoading.classList.add('hidden');
+    elements.mainContent.setAttribute('aria-busy', 'false');
+    if (!isRetry) state.compareController = null;
+
+    setCompareLocations(settled);
+  }
+
+  // --- Rendering ------------------------------------------------------------
+
+  /** Is the comparison surface the one currently on screen? */
+  function isCompareVisible() {
+    return !!elements.compareSection && !elements.compareSection.classList.contains('hidden');
+  }
+
+  /**
+   * Paint the whole compare surface from `state.compareLocations`.
+   *
+   * Everything below reuses the engine's already-shaped output, so there is no
+   * comparison logic left in the DOM layer beyond "put this text in that cell".
+   */
+  function renderCompareSection() {
+    const engine = compareEngine();
+    if (!engine) return;
+
+    renderCompareSlots();
+
+    const comparable = engine.canCompare(state.compareLocations);
+    elements.compareRunBtn.disabled = !comparable;
+    elements.compareAddBtn.disabled = !engine.canAddMore(state.compareLocations);
+    elements.compareClearBtn.disabled = state.compareLocations.length === 0;
+    elements.compareCount.textContent = `${state.compareLocations.length} of ${engine.THRESHOLDS.maxLocations} selected`;
+
+    const hasData = state.compareLocations.some((slot) => slot && slot.weather);
+    const hasError = state.compareLocations.some((slot) => slot && slot.error);
+
+    elements.compareGlanceCard.classList.toggle('hidden', !hasData && !hasError);
+    elements.compareCurrentCard.classList.toggle('hidden', !hasData && !hasError);
+    elements.compareForecastCard.classList.toggle('hidden', !hasData);
+
+    if (!hasData && !hasError) return;
+
+    const format = compareFormat();
+    const current = engine.buildTable(state.compareLocations, format);
+    const forecast = engine.buildForecastTable(state.compareLocations, format);
+
+    renderCompareTable(elements.compareCurrentTable, current);
+    renderCompareTable(elements.compareForecastTable, forecast);
+    renderCompareInsights(engine.buildInsights(state.compareLocations, format), current);
+    renderCompareFreshness(state.compareLocations);
+  }
+
+  /**
+   * The location picker.
+   *
+   * Rows are rebuilt only when the list actually changes shape (added, removed,
+   * replaced, reordered); the per-second clock inside each header is registered
+   * with the app's existing ticker rather than given a timer of its own.
+   */
+  function renderCompareSlots() {
+    const container = elements.compareSlots;
+    const locations = state.compareLocations;
+
+    const signature = locations
+      .map((slot) => (slot && slot.city ? `${slot.city.name}|${slot.city.latitude}|${slot.city.longitude}` : '-'))
+      .join('~');
+    if (container.dataset.signature === signature) return;
+
+    container.dataset.signature = signature;
+    unregisterCompareClocks();
+    container.innerHTML = '';
+
+    const engine = compareEngine();
+    const max = engine ? engine.THRESHOLDS.maxLocations : 4;
+
+    locations.forEach((slot, index) => {
+      const row = document.createElement('div');
+      row.className = 'compare-slot';
+
+      const label = document.createElement('span');
+      label.className = 'compare-slot-label';
+      label.id = `compare-slot-${index}`;
+      label.textContent = `Location ${COMPARE_SLOT_LABELS[index] || index + 1}`;
+      row.appendChild(label);
+
+      if (slot && slot.city) {
+        row.appendChild(createComparePlaceButton(slot.city, index));
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'compare-slot-actions';
+      actions.append(
+        compareIconButton('Move earlier', ICON_ARROW_UP, () => moveCompareLocation(index, -1), index === 0),
+        compareIconButton('Move later', ICON_ARROW_DOWN, () => moveCompareLocation(index, 1), index === locations.length - 1),
+        slot && slot.city
+          ? compareIconButton(`Remove ${slot.city.name} from the comparison`, ICON_TRASH, () => removeCompareLocation(index), false)
+          : compareIconButton('Clear this location', ICON_CLOSE, () => removeCompareLocation(index), false)
+      );
+      row.appendChild(actions);
+
+      container.appendChild(row);
+    });
+
+    // Show the remaining capacity as empty placeholders, so the 2-4 range and
+    // the "add" affordance are visible before the list is full.
+    for (let index = locations.length; index < max; index += 1) {
+      const empty = document.createElement('div');
+      empty.className = 'compare-slot-empty';
+
+      const text = document.createElement('span');
+      text.textContent = `Location ${COMPARE_SLOT_LABELS[index] || index + 1} — use the search above or a popular city`;
+
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'compare-retry-btn';
+      add.textContent = 'Add';
+      add.addEventListener('click', focusCompareSearch);
+
+      empty.append(text, add);
+      container.appendChild(empty);
+    }
+  }
+
+  /** Clock registrations owned by the comparison table headers. */
+  let compareClockIds = [];
+
+  function unregisterCompareClocks() {
+    compareClockIds.forEach((id) => unregisterClock(id));
+    compareClockIds = [];
+  }
+
+  /**
+   * The place chip inside a picker row. Clicking it focuses the search box so
+   * the existing autocomplete can replace the location - no separate picker UI.
+   */
+  function createComparePlaceButton(city, index) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'compare-slot-place';
+    button.setAttribute('aria-describedby', `compare-slot-${index}`);
+
+    const badge = document.createElement('span');
+    badge.className = 'compare-slot-place-icon';
+    badge.setAttribute('aria-hidden', 'true');
+    badge.textContent = String(index + 1);
+
+    const text = document.createElement('span');
+    text.className = 'compare-slot-place-text';
+
+    const name = document.createElement('span');
+    name.className = 'compare-slot-place-name';
+    name.textContent = city.name || 'Unknown location';
+
+    const meta = document.createElement('span');
+    meta.className = 'compare-slot-place-meta';
+    meta.textContent = [city.admin1, city.country].filter(Boolean).join(', ') || 'Selected location';
+
+    text.append(name, meta);
+    button.append(badge, text);
+    button.setAttribute('aria-label', `${city.name}, ${meta.textContent}. Change this location.`);
+    button.addEventListener('click', () => beginCompareReplace(index));
+
+    return button;
+  }
+
+  /** Small reusable circular icon button for the picker rows. */
+  function compareIconButton(label, iconPath, onClick, disabled) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'compare-slot-btn';
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    button.disabled = !!disabled;
+    button.innerHTML = iconPath;
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  /**
+   * Render a comparison table.
+   *
+   * Node reuse keeps a degC/degF toggle or a 10-minute auto-refresh from
+   * rebuilding 10 rows x 4 columns of DOM: when the set of locations is
+   * unchanged only the value text nodes are rewritten.
+   */
+  function renderCompareTable(tableEl, table) {
+    if (!tableEl) return;
+
+    const signature = table.columns.map((column) => compareEngine().cityKey(column.city)).join('~');
+    const cached = tableEl.__compareRefs;
+
+    let refs = cached;
+    if (!refs || refs.signature !== signature) {
+      refs = buildCompareTable(tableEl, table, signature);
+      tableEl.__compareRefs = refs;
+    }
+
+    paintCompareTable(refs, table);
+  }
+
+  /** Build the whole table once; the returned refs drive every later update. */
+  function buildCompareTable(tableEl, table, signature) {
+    tableEl.innerHTML = '';
+
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+
+    const corner = document.createElement('th');
+    corner.className = 'compare-metric-head';
+    corner.scope = 'col';
+    corner.textContent = 'Metric';
+    headRow.appendChild(corner);
+
+    const columnRefs = table.columns.map((column) => {
+      const th = document.createElement('th');
+      th.scope = 'col';
+
+      const wrap = document.createElement('div');
+      wrap.className = 'compare-col-head';
+
+const icon = document.createElement('span');
+      icon.className = 'compare-col-icon';
+      icon.setAttribute('aria-hidden', 'true');
+
+      const text = document.createElement('span');
+      text.className = 'compare-col-text';
+
+      const name = document.createElement('span');
+      name.className = 'compare-col-name';
+
+      const meta = document.createElement('span');
+      meta.className = 'compare-col-meta';
+
+      // Every column carries its city's live clock, like every other surface in
+      // the app. The offset pill is the per-second target registered with the
+      // shared ticker; the zone abbreviation is its stable, non-volatile
+      // sibling, so screen readers are not re-read a string every second.
+      const clock = document.createElement('span');
+      clock.className = 'compare-col-clock';
+
+      const offset = document.createElement('span');
+      offset.className = 'compare-col-clock-offset';
+      // Per-second digits: hidden from assistive tech, exactly like every other
+      // clock surface. The header's aria-label carries the non-volatile facts.
+      hideVolatileNode(offset);
+
+      const zone = document.createElement('span');
+      zone.className = 'compare-col-clock-zone';
+
+      clock.append(offset, zone);
+      text.append(name, meta, clock);
+      wrap.append(icon, text);
+      th.appendChild(wrap);
+      headRow.append(th);
+
+      return { th, icon, name, meta, offset, zone, column };
+    });
+
+    thead.appendChild(headRow);
+    tableEl.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    const cells = table.rows.map((row) => {
+      const tr = document.createElement('tr');
+
+      // A row header keeps every value tied to its metric for screen readers,
+      // and the sticky first column keeps that tie visible on a narrow screen.
+      const th = document.createElement('th');
+      th.className = 'compare-metric-cell';
+      th.scope = 'row';
+
+      const label = document.createElement('span');
+      label.className = 'compare-metric-label';
+
+      const icon = document.createElement('span');
+      icon.className = 'compare-metric-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = row.icon || '';
+
+      const text = document.createElement('span');
+      text.textContent = row.label;
+      label.append(icon, text);
+      th.appendChild(label);
+      tr.appendChild(th);
+
+      const rowCells = row.cells.map(() => {
+        const td = document.createElement('td');
+        tr.appendChild(td);
+        return { td, mode: null, value: null, errorText: null };
+      });
+
+      tbody.appendChild(tr);
+      return rowCells;
+    });
+
+    tableEl.appendChild(tbody);
+    // One custom property lets the CSS size every city column.
+    tableEl.style.setProperty('--compare-cols', String(table.columns.length));
+
+    return { signature, columnRefs, cells };
+  }
+
+  /** Push the current values into an existing set of table nodes. */
+  function paintCompareTable(refs, table) {
+    refs.columnRefs.forEach((columnRef, index) => {
+      const column = table.columns[index];
+      const zone = (column.city && column.city.timezone) || 'UTC';
+      const now = new Date();
+
+      columnRef.name.textContent = column.city ? column.city.name : 'Location';
+      columnRef.meta.textContent = [column.city && column.city.admin1, column.city && column.city.country]
+        .filter(Boolean)
+        .join(', ') || '—';
+
+      // Reuse the app's condition icon + timezone vocabulary verbatim.
+      if (column.entry) {
+        columnRef.icon.innerHTML = compareConditionIcon(column.entry);
+      } else {
+        columnRef.icon.textContent = '—';
+      }
+
+      columnRef.offset.textContent = formatOffsetDiffCompact(zone, now);
+      columnRef.zone.textContent = getZoneAbbreviation(zone, now);
+      columnRef.zone.title = `${zone} - ${formatOffsetLabel(zone, now)}`;
+
+      // Non-volatile accessible summary, so the per-second tick is not announced.
+      const summary = [
+        column.city ? column.city.name : 'Location',
+        column.city && column.country ? column.country : '',
+        `Local time zone ${zone}, ${describeTimeDifference(zone, now)}`,
+      ].filter(Boolean).join('. ');
+      columnRef.th.setAttribute('aria-label', summary);
+    });
+
+    table.rows.forEach((row, rowIndex) => {
+      const rowCells = refs.cells[rowIndex];
+      if (!rowCells) return;
+      row.cells.forEach((cell, colIndex) => {
+        paintCompareCell(rowCells[colIndex], cell, table.columns[colIndex]);
+      });
+    });
+
+    refreshCompareClocks(refs);
+  }
+
+  /**
+   * One table cell: either the formatted value, or - when that location failed
+   * - an explicit "unavailable" line with a retry that refetches just this
+   * column.
+   */
+  function paintCompareCell(ref, cell, column) {
+    if (!ref) return;
+
+    if (column.status !== 'ok') {
+      if (ref.mode !== 'error') {
+        ref.td.innerHTML = '';
+        const wrap = document.createElement('div');
+        wrap.className = 'compare-col-error';
+
+        const text = document.createElement('span');
+        text.className = 'compare-col-error-text';
+
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'compare-retry-btn';
+        retry.textContent = 'Try again';
+        retry.setAttribute('aria-label', `Retry loading the weather for ${column.city ? column.city.name : 'this location'}`);
+        retry.addEventListener('click', () => loadComparisonWeather({ retryIndex: column.index }));
+
+        wrap.append(text, retry);
+        ref.td.appendChild(wrap);
+        ref.errorText = text;
+        ref.mode = 'error';
+      }
+      const reason = (column.error && column.error.message) || 'Weather unavailable';
+      if (ref.errorText.textContent !== reason) ref.errorText.textContent = reason;
+      return;
+    }
+
+    if (ref.mode !== 'value') {
+      ref.td.innerHTML = '';
+      const value = document.createElement('span');
+      value.className = 'compare-value';
+      // API-derived text is written with textContent, never interpolated.
+      value.textContent = cell.text;
+      ref.td.appendChild(value);
+      ref.value = value;
+      ref.mode = 'value';
+    } else if (ref.value.textContent !== cell.text) {
+      ref.value.textContent = cell.text;
+    }
+
+    if (cell.emphasis) {
+      ref.value.setAttribute('data-emphasis', cell.emphasis);
+    } else {
+      ref.value.removeAttribute('data-emphasis');
+    }
+  }
+
+  /**
+   * Register the header clocks with the shared ticker. One registration per
+   * column, replaced (never duplicated) whenever the column set changes.
+   */
+  function refreshCompareClocks(refs) {
+    unregisterCompareClocks();
+    if (!isCompareVisible()) return;
+
+    refs.columnRefs.forEach((columnRef) => {
+      const zone = (columnRef.column.city && columnRef.column.city.timezone) || 'UTC';
+
+      // One registration per column drives both the offset pill and the zone
+      // abbreviation, so a column never registers two independent timers.
+      compareClockIds.push(
+        registerClock(zone, new Map([
+          [columnRef.offset, (tz, now) => {
+            columnRef.offset.textContent = formatOffsetDiffCompact(tz, now);
+          }],
+          [columnRef.zone, (tz, now) => {
+            const label = getZoneAbbreviation(tz, now);
+            if (columnRef.zone.textContent !== label) columnRef.zone.textContent = label;
+          }],
+        ]), () => isCompareVisible())
+      );
+    });
+  }
+
+  /** "Weather at a glance" - the sentences come straight from the engine. */
+  function renderCompareInsights(insights, table) {
+    const list = elements.compareInsights;
+    list.innerHTML = '';
+
+    if (!insights || insights.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'compare-insight-empty';
+      empty.setAttribute('role', 'listitem');
+      empty.textContent =
+        table.okCount < 2
+          ? 'At least two locations with live data are needed for a comparison.'
+          : 'These locations are currently very similar - no difference stands out.';
+      list.appendChild(empty);
+      return;
+    }
+
+    insights.forEach((text) => {
+      const item = document.createElement('li');
+      item.className = 'compare-insight';
+      item.setAttribute('role', 'listitem');
+      item.textContent = text;
+      list.appendChild(item);
+    });
+  }
+
+  /** "Latest reading: Updated 4 min ago" - the stalest column decides. */
+  function renderCompareFreshness(locations) {
+    if (!elements.compareFreshness) return;
+
+    let oldest = null;
+    locations.forEach((slot) => {
+      if (!slot || !slot.weather) return;
+      const label = formatFreshness(slot.weather.current.time, slot.weather.utc_offset_seconds);
+      if (!label) return;
+      const minutes = Number((label.match(/(\d+)\s*min/) || [])[1] || 0);
+      if (oldest === null || minutes > oldest.minutes) oldest = { label, minutes };
+    });
+
+    elements.compareFreshness.textContent = oldest ? `Latest reading: ${oldest.label.toLowerCase()}` : '';
+  }
+
+  /**
+   * Move focus to the shared search box.
+   *
+   * Both the "Add" placeholders and a filled location chip route through here,
+   * so picking a location for a slot is the same autocomplete the rest of the
+   * app already uses rather than a second, parallel picker.
+   */
+  function focusCompareSearch() {
+    closeAutocomplete();
+    elements.searchInput.focus();
+    elements.searchInput.select();
   }
 
   // ==========================================================================
@@ -2435,7 +3318,10 @@
     elements.climateResultsSection.classList.add('hidden');
     elements.errorTitle.textContent = title;
     elements.errorMessage.textContent = message;
-    elements.errorState.classList.remove('hidden');
+    // The full-screen error belongs to the dashboard and the climate filter.
+    // In compare mode a failed city load reports itself inside its own column,
+    // so the comparison surface must stay untouched.
+    if (state.searchMode !== 'compare') elements.errorState.classList.remove('hidden');
   }
 
   // ==========================================================================
@@ -2525,6 +3411,13 @@
 
       item.addEventListener('click', () => {
         closeAutocomplete();
+        // Compare mode shares this dropdown with City Search, so the picked
+        // place is routed by whichever mode is active.
+        if (state.searchMode === 'compare') {
+          addCompareLocation(city);
+          resetCompareSearchInput();
+          return;
+        }
         loadCityWeather(city);
       });
       item.addEventListener('mouseenter', () => setActiveOption(idx));
@@ -2606,7 +3499,12 @@
     const chosen = options[state.activeOptionIndex];
     if (!chosen) return false;
     closeAutocomplete();
-    loadCityWeather(chosen.city);
+    if (state.searchMode === 'compare') {
+      addCompareLocation(chosen.city);
+      resetCompareSearchInput();
+    } else {
+      loadCityWeather(chosen.city);
+    }
     return true;
   }
 
@@ -2615,15 +3513,27 @@
   // ==========================================================================
   async function handleGeolocation() {
     if (!navigator.geolocation) {
+      if (state.searchMode === 'compare') {
+        setCompareNotice('Your browser does not support automatic location detection.');
+        return;
+      }
       showError('Geolocation Unsupported', 'Your browser does not support automatic location detection.');
       return;
     }
 
-    elements.dashboard.classList.add('hidden');
-    elements.climateResultsSection.classList.add('hidden');
-    elements.errorState.classList.add('hidden');
-    elements.loadingText.textContent = 'Detecting your geographical location...';
-    elements.loadingState.classList.remove('hidden');
+    const toCompare = state.searchMode === 'compare';
+
+    // The compare surface has its own inline feedback, so it must not have the
+    // dashboard's full-screen loading state dropped over it.
+    if (toCompare) {
+      setCompareNotice('Detecting your geographical location...');
+    } else {
+      elements.dashboard.classList.add('hidden');
+      elements.climateResultsSection.classList.add('hidden');
+      elements.errorState.classList.add('hidden');
+      elements.loadingText.textContent = 'Detecting your geographical location...';
+      elements.loadingState.classList.remove('hidden');
+    }
 
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
@@ -2653,10 +3563,20 @@
           console.warn('Reverse geocoding fallback to coordinates', e);
         }
 
+        // The mode can change while the browser prompt is open, so re-read it.
+        if (state.searchMode === 'compare') {
+          addCompareLocation(detectedCity);
+          setCompareNotice('');
+          return;
+        }
         loadCityWeather(detectedCity);
       },
       (err) => {
         console.warn('Geolocation denied or failed:', err);
+        if (state.searchMode === 'compare') {
+          setCompareNotice('Could not retrieve your location. Check browser permissions, or search for a city directly.');
+          return;
+        }
         showError(
           'Location Access Denied',
           'Could not retrieve your location. Please check browser permissions or search for your city directly.'
@@ -2667,47 +3587,124 @@
   }
 
   // ==========================================================================
+  // Mode Switching
+  // ==========================================================================
+  /** The three modes, in tab order, with the search placeholder each owns. */
+  const MODES = [
+    { mode: 'city', placeholder: 'Search for a city (e.g. Paris, Tokyo, New York)...' },
+    { mode: 'compare', placeholder: 'Add a location to compare (e.g. Athens, Oslo, Cairo)...' },
+    { mode: 'climate', placeholder: 'Search climate: e.g. Sunny, Warm, Rain, Snow, > 25°C, Cold < 10°C...' },
+  ];
+
+  function modeTab(mode) {
+    if (mode === 'city') return elements.tabModeCity;
+    if (mode === 'compare') return elements.tabModeCompare;
+    return elements.tabModeClimate;
+  }
+
+  /**
+   * Reflect the active mode across the three tabs and the surfaces they own.
+   *
+   * Compare mode reuses the city search box and the popular-city chips, so it
+   * differs from City Search only in what a picked city does with it.
+   *
+   * This lives at module scope rather than inside `setupEvents` because `init`
+   * has to establish the initial tab state through the same code path the tabs
+   * use, so only the active tab ever holds a tab stop.
+   */
+  function setMode(mode) {
+    state.searchMode = mode;
+
+    MODES.forEach(({ mode: id }) => {
+      const tab = modeTab(id);
+      if (!tab) return;
+      const active = id === mode;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      // Roving tabindex: one tab stop for the tablist. The arrow-key handler in
+      // `setupEvents` is what makes the other two reachable.
+      tab.tabIndex = active ? 0 : -1;
+    });
+
+    const activeMode = MODES.find((entry) => entry.mode === mode) || MODES[0];
+    elements.searchInput.placeholder = activeMode.placeholder;
+    elements.quickCitiesContainer.classList.toggle('hidden', mode === 'climate');
+    elements.climateChipsContainer.classList.toggle('hidden', mode !== 'climate');
+
+    // Compare mode has its own surface; City/Climate own the dashboard.
+    elements.dashboard.classList.toggle('hidden', mode === 'compare');
+    elements.errorState.classList.add('hidden');
+    if (elements.compareSection) {
+      elements.compareSection.classList.toggle('hidden', mode !== 'compare');
+    }
+
+    if (mode === 'climate') {
+      // Warm the global batch cache only when climate mode is actually used (#9)
+      fetchGlobalCitiesWeather().catch((err) => console.warn('Global prefetch:', err));
+    }
+
+    if (mode === 'compare') renderCompareSection();
+
+    // A pending re-pick is meaningless once the picker is off screen.
+    if (mode !== 'compare') state.compareReplaceIndex = null;
+
+    // A switch away from compare stops its in-flight fetch from painting into
+    // a surface the visitor can no longer see.
+    if (mode !== 'compare' && elements.compareLoading && !elements.compareLoading.classList.contains('hidden')) {
+      abortComparison();
+      elements.compareLoading.classList.add('hidden');
+      elements.mainContent.setAttribute('aria-busy', 'false');
+    }
+
+    if (mode !== 'city') elements.searchInput.focus();
+    closeAutocomplete();
+  }
+
+  // ==========================================================================
   // Event Listeners
   // ==========================================================================
   function setupEvents() {
-    // Mode Switcher Tabs
-    function setMode(mode) {
-      state.searchMode = mode;
-      if (mode === 'city') {
-        elements.tabModeCity.classList.add('active');
-        elements.tabModeCity.setAttribute('aria-selected', 'true');
-        elements.tabModeClimate.classList.remove('active');
-        elements.tabModeClimate.setAttribute('aria-selected', 'false');
-
-        elements.searchInput.placeholder = 'Search for a city (e.g. Paris, Tokyo, New York)...';
-        elements.quickCitiesContainer.classList.remove('hidden');
-        elements.climateChipsContainer.classList.add('hidden');
-      } else {
-        elements.tabModeClimate.classList.add('active');
-        elements.tabModeClimate.setAttribute('aria-selected', 'true');
-        elements.tabModeCity.classList.remove('active');
-        elements.tabModeCity.setAttribute('aria-selected', 'false');
-
-        elements.searchInput.placeholder = 'Search climate: e.g. Sunny, Warm, Rain, Snow, > 25°C, Cold < 10°C...';
-        elements.quickCitiesContainer.classList.add('hidden');
-        elements.climateChipsContainer.classList.remove('hidden');
-        elements.searchInput.focus();
-
-        // Warm the global batch cache only when climate mode is actually used (#9)
-        fetchGlobalCitiesWeather().catch((err) => console.warn('Global prefetch:', err));
-      }
-      closeAutocomplete();
-    }
-
     elements.tabModeCity.addEventListener('click', () => setMode('city'));
     elements.tabModeClimate.addEventListener('click', () => setMode('climate'));
+    if (elements.tabModeCompare) {
+      elements.tabModeCompare.addEventListener('click', () => setMode('compare'));
+    }
+
+    // `setMode` gives only the active tab a tab stop, so the tablist needs its
+    // own arrow-key navigation - otherwise the inactive tabs become unreachable
+    // by keyboard. Home/End jump to the ends, matching the app's other widgets.
+    const modeTabs = () => MODES.map((entry) => modeTab(entry.mode)).filter(Boolean);
+    const tablist = elements.tabModeCity.closest('.search-mode-tabs');
+
+    if (tablist) {
+      tablist.addEventListener('keydown', (e) => {
+        const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'];
+        if (!keys.includes(e.key)) return;
+
+        const tab = e.target.closest('.mode-tab');
+        if (!tab) return;
+        e.preventDefault();
+
+        const tabs = modeTabs();
+        const index = tabs.indexOf(tab);
+        if (index === -1) return;
+
+        let next;
+        if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = tabs.length - 1;
+        else next = (index + (e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1) + tabs.length) % tabs.length;
+
+        setMode(MODES[next].mode);
+        tabs[next].focus();
+      });
+    }
 
     // Form submit
     elements.searchForm.addEventListener('submit', (e) => {
       e.preventDefault();
 
       // If a suggestion is highlighted, Enter commits that suggestion
-      if (state.searchMode === 'city' && commitActiveOption()) return;
+      if (state.searchMode !== 'climate' && commitActiveOption()) return;
 
       closeAutocomplete();
       const query = elements.searchInput.value.trim();
@@ -2715,6 +3712,8 @@
 
       if (state.searchMode === 'climate') {
         handleClimateSearch(query);
+      } else if (state.searchMode === 'compare') {
+        handleCompareSearch(query);
       } else {
         handleCitySearch(query);
       }
@@ -2723,6 +3722,16 @@
     // Keyboard navigation for the autocomplete listbox
     elements.searchInput.addEventListener('keydown', (e) => {
       const hasOptions = (elements.autocompleteOptions || []).length > 0;
+
+      // Escape backs out of a pending re-pick. While the listbox is open it
+      // only dismisses that first, leaving the swap pending, so a single Escape
+      // never silently turns "replace" back into "append".
+      if (e.key === 'Escape' && !hasOptions && state.compareReplaceIndex !== null) {
+        e.preventDefault();
+        cancelCompareReplace();
+        return;
+      }
+
       if (!hasOptions) return;
 
       switch (e.key) {
@@ -2837,7 +3846,10 @@
       const chip = e.target.closest('.chip');
       if (!chip || !chip.dataset.city) return;
 
-      setMode('city');
+      // Compare mode keeps the same chips visible, and picking one there fills
+      // a slot instead of replacing the dashboard - so the mode is read, not
+      // forced back to City Search.
+      const toCompare = state.searchMode === 'compare';
 
       // Resolve against the local benchmark database first. Names like "Paris",
       // "Sydney" or "Rome" match several places worldwide, and going through
@@ -2849,11 +3861,18 @@
       );
 
       if (known) {
-        loadCityWeather(known);
+        if (toCompare) {
+          addCompareLocation(known);
+          setCompareNotice('');
+        } else {
+          setMode('city');
+          loadCityWeather(known);
+        }
         return;
       }
 
-      handleCitySearch(chip.dataset.city);
+      if (toCompare) handleCompareSearch(chip.dataset.city);
+      else handleCitySearch(chip.dataset.city);
     });
 
     // Climate Preset Chips
@@ -2975,6 +3994,10 @@
       } else if (state.matchingCities.length > 0 && !elements.climateResultsSection.classList.contains('hidden')) {
         renderClimateResults(state.matchingCities, currentClimateCriteria());
       }
+
+      // The comparison borrows the same unit-aware formatters, so a repaint is
+      // all it needs - no refetch.
+      if (isCompareVisible()) renderCompareSection();
     }
 
     elements.unitC.addEventListener('click', () => setUnit('celsius'));
@@ -2990,6 +4013,28 @@
       if (elements.dashboard.classList.contains('hidden')) return;
       if (!state.currentCity) return;
       loadCityWeather(state.currentCity);
+    }, 10 * 60 * 1000);
+
+    // Compare Locations actions
+    if (elements.compareRunBtn) {
+      elements.compareRunBtn.addEventListener('click', () => loadComparisonWeather());
+    }
+
+    if (elements.compareAddBtn) {
+      elements.compareAddBtn.addEventListener('click', focusCompareSearch);
+    }
+
+    if (elements.compareClearBtn) {
+      elements.compareClearBtn.addEventListener('click', clearCompareLocations);
+    }
+
+    // Auto-refresh the comparison on the same cadence as the dashboard, but
+    // only while it is actually on screen.
+    setInterval(() => {
+      if (document.hidden) return;
+      if (!isCompareVisible()) return;
+      if (!state.compareLocations.some((slot) => slot && slot.weather)) return;
+      loadComparisonWeather();
     }, 10 * 60 * 1000);
   }
 
@@ -3007,6 +4052,10 @@
   function init() {
     setupEvents();
 
+    // Establish the initial tab state through the same code path the tabs use,
+    // so the active tab carries the single tab stop from the first paint.
+    setMode('city');
+
     // Boot the shared ticker and the visitor's reference clock before any data
     // arrives, so there is a clock on screen from the first paint.
     registerUserClock();
@@ -3014,6 +4063,11 @@
 
     // Render the unit-aware thresholds on the preset chips before first paint
     refreshChipThresholds();
+
+    // Paint the comparison surface once at startup so the picker rows and the
+    // disabled/enabled state of its buttons are correct before first use, even
+    // though the section starts hidden.
+    renderCompareSection();
 
     if (state.unit === 'fahrenheit') {
       elements.unitF.classList.add('active');

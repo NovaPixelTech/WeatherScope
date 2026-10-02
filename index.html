@@ -56,6 +56,16 @@
             </svg>
             <span>City Search</span>
           </button>
+          <!-- Third mode: compare 2-4 picked places side by side. The search box
+               above becomes "add a location" and the popular-city chips append
+               straight to the comparison, so no new input is introduced. It sits
+               between the two place-picking modes and the climate filter. -->
+          <button type="button" class="mode-tab" id="tab-mode-compare" role="tab" aria-selected="false" aria-controls="main-content">
+            <svg viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h4a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm9 0a1 1 0 011-1h4a1 1 0 011 1v12a1 1 0 01-1 1h-4a1 1 0 01-1-1V4zM6 6v2h2V6H6zm0 4v2h2v-2H6zm6-4v2h2V6h-2zm0 4v2h2v-2h-2z" clip-rule="evenodd" />
+            </svg>
+            <span>Compare</span>
+          </button>
           <button type="button" class="mode-tab" id="tab-mode-climate" role="tab" aria-selected="false" aria-controls="main-content">
             <svg viewBox="0 0 20 20" fill="currentColor">
               <path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd" />
@@ -257,6 +267,77 @@
         <div class="climate-results-grid" id="climate-results-grid" aria-label="Matching cities">
           <!-- Injected via JavaScript -->
         </div>
+      </section>
+
+      <!-- Compare Locations Mode (2-4 picked places, side by side).
+           The whole feature lives in its own section so the dashboard and the
+           climate grid are untouched: entering/leaving compare mode is a single
+           `.hidden` toggle, exactly like the existing views. -->
+      <section id="compare-section" class="compare-section hidden" aria-labelledby="compare-heading">
+        <!-- 1. Location selection -->
+        <div class="card compare-locations-card">
+          <div class="compare-title-row">
+            <h2 class="card-section-title" id="compare-heading">Compare Locations</h2>
+            <span class="count-badge" id="compare-count">0 of 4 selected</span>
+          </div>
+          <p class="card-subtitle" id="compare-subtitle">
+            Search above or tap a popular city to build a list, then compare 2 to 4 places.
+          </p>
+
+          <!-- One row per selected location, injected by app.js -->
+          <div class="compare-slots" id="compare-slots"></div>
+
+          <div class="compare-actions">
+            <button type="button" class="btn btn-secondary compare-action-btn" id="compare-add-btn">
+              <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
+              </svg>
+              <span>Add location</span>
+            </button>
+            <button type="button" class="btn btn-search compare-action-btn" id="compare-run-btn">Compare</button>
+            <button type="button" class="btn btn-secondary compare-action-btn" id="compare-clear-btn">Clear all</button>
+          </div>
+
+          <!-- Duplicate / capacity / selection feedback, announced politely -->
+          <p class="compare-notice" id="compare-notice" role="status" aria-live="polite"></p>
+        </div>
+
+        <!-- 2. Loading state (only visible while a comparison is in flight) -->
+        <div id="compare-loading" class="state-card loading-state compare-loading-state hidden" role="status" aria-live="polite">
+          <div class="spinner"></div>
+          <p class="state-text" id="compare-loading-text">Comparing weather...</p>
+        </div>
+
+        <!-- 3. Human-readable summary -->
+        <section class="card compare-glance-card hidden" id="compare-glance-card" aria-labelledby="compare-glance-heading">
+          <h2 class="card-section-title" id="compare-glance-heading">Weather at a glance</h2>
+          <ul class="compare-insights" id="compare-insights" role="list"></ul>
+        </section>
+
+        <!-- 4. Current conditions. The tables opt out of the surrounding live
+             region: a 10-row grid rebuilt on every unit toggle would otherwise be
+             read out in full, while the glance summary above already announces
+             the result concisely. -->
+        <section class="card compare-table-card hidden" id="compare-current-card" aria-labelledby="compare-current-heading">
+          <div class="card-header-row">
+            <h2 class="card-section-title" id="compare-current-heading">Current conditions</h2>
+            <span class="card-subtitle" id="compare-freshness"></span>
+          </div>
+          <div class="compare-table-wrap" tabindex="0" role="region" aria-labelledby="compare-current-heading" aria-live="off">
+            <table class="compare-table" id="compare-current-table"></table>
+          </div>
+        </section>
+
+        <!-- 5. Today's forecast comparison -->
+        <section class="card compare-table-card hidden" id="compare-forecast-card" aria-labelledby="compare-forecast-heading">
+          <div class="card-header-row">
+            <h2 class="card-section-title" id="compare-forecast-heading">Today&rsquo;s forecast comparison</h2>
+            <span class="card-subtitle">Highest, lowest, rain chance &amp; peak values</span>
+          </div>
+          <div class="compare-table-wrap" tabindex="0" role="region" aria-labelledby="compare-forecast-heading" aria-live="off">
+            <table class="compare-table" id="compare-forecast-table"></table>
+          </div>
+        </section>
       </section>
 
       <!-- Full Weather Dashboard (Populated dynamically) -->
@@ -551,6 +632,8 @@
   <!-- Pure forecast logic, no DOM access: loaded before the app so the
        dashboard can render recommendations from data it already has. -->
   <script src="advice.js"></script>
+  <!-- Pure comparison logic (location list, metrics, insights), no DOM access -->
+  <script src="compare.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

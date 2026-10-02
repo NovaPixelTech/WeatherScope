@@ -8,14 +8,17 @@ Powered by the [Open-Meteo API](https://open-meteo.com/), SkyCast operates with 
 
 ## ✨ Features
 
-### 🔍 Dual Search Modes
+### 🔍 Three Search Modes
+
 1. **City Search Mode**:
    - Real-time debounced autocomplete suggestions showing matching cities, regions, and countries.
    - Enter key or quick search for any city on Earth.
    - One-click chips for 20 popular global cities, kept in strict **A-Z order** (Athens → Tokyo) and rendered as a uniformly sized grid, so every button lines up horizontally and vertically.
    - One-click GPS location detection with reverse geocoding.
 
-2. **Climate & Weather Filter Mode (New! 🎉)**:
+2. **Compare Locations Mode (New! 🎉)**: pick 2–4 places and read them side by side — see [Compare Locations](#-compare-locations).
+
+3. **Climate & Weather Filter Mode**:
    - **Search by preferred climate**: Type conditions such as `"Sunny"`, `"Rain"`, `"Snow"`, `"Warm"`, `"Hot > 25°C"`, or `"Cold < 10°C"`.
    - **20 one-click presets** (row 1 *sky conditions* → row 2 *temperature bands ascending* → row 3 *heat, humidity & wind* → row 4 *curated combinations*):
      | Row | Presets |
@@ -85,6 +88,44 @@ node --test
 ```
 
 `tests/advice.test.js` covers the recommendation logic (thresholds, units, late-night scope, missing data, hostile payloads, determinism) and `tests/wiring.test.js` covers the glue (browser global, script order, element bindings, card placement, escaping, styling).
+
+The comparison has three files of its own:
+
+| File | What it protects |
+| --- | --- |
+| `tests/compare.test.js` | The engine: duplicate refusal, the 2–4 limit, replace/reorder edge cases, per-column failure, missing-as-`null` readings, ties, thresholds, the statement budget, neutral wording. |
+| `tests/compare-wiring.test.js` | The glue: script order, element ids, tab semantics, section placement, escaping, `data-emphasis` staying neutral, every applied class being styled. |
+| `tests/compare-runtime.test.js` | The app **booted against a small hand-written DOM stub** — no jsdom, no dependencies. It switches mode, picks 3 and 4 places (and holds the 4 cap), re-picks a slot to replace it, resolves an ambiguous name, runs a comparison, fails one column, retries it, toggles °C ↔ °F and clears out, asserting nothing throws at runtime. |
+
+---
+
+## 📊 Compare Locations
+
+The third mode answers one question: *what is the weather like in these places, and how different are they?*
+
+### Using it
+
+Pick **Compare** in the mode tabs. The search box and the popular-city chips are reused as-is — a picked place fills the next slot instead of replacing the dashboard. **2–4** locations can be compared; each slot can be moved up/down or removed.
+
+To **replace** a location, click its chip. The picker reopens with a prompt naming the slot ("Choosing a new location for Location A (currently Athens)…") and the next pick swaps that slot in place rather than appending a fourth one. **Escape** abandons it and keeps the original. A swap that would duplicate a place you already hold is refused with the reason, and re-picking the same place is a no-op rather than an error.
+
+| Surface | What it shows |
+| --- | --- |
+| **Weather at a glance** | Up to five neutral sentences derived from the real numbers — the largest differences first, and only where the gap exceeds its own threshold. |
+| **Current conditions** | Condition, temperature, feels-like, rain chance, wind, UV, humidity, precipitation, cloud cover and sunrise/sunset, one column per location. |
+| **Today's forecast** | High, low, rain chance, peak UV and strongest wind — so two cities can be compared on the day, not just the moment. |
+| **Latest reading** | One "Updated N min ago" stamp, taken from the **stalest** column, corrected for each city's UTC offset. |
+
+Every column header carries that city's own local time, UTC offset from *your* clock and zone abbreviation, driven by the same shared clock registry as the rest of the app.
+
+### Design decisions
+
+- **One failure never takes down the comparison.** Columns are fetched in parallel with `Promise.allSettled`; a timeout or network error degrades just that column to an explicit *"Weather data unavailable"* with a **Try again** button that refetches only itself.
+- **Missing is not zero.** A reading that is absent renders as `--` and is excluded from both the extremes and the sentences, so a difference is never invented between two equals.
+- **Nothing is styled as better or worse.** Extremes get one neutral accent bar, because neither end of a temperature range is preferable.
+- **No unit logic of its own.** `compare.js` receives the app's existing formatters, so the °C ↔ °F toggle repaints the comparison instantly with no refetch, and `WMO_MAP` stays the single source of weather wording.
+- **Independence of columns.** A location you are already viewing on the dashboard reuses that payload verbatim instead of issuing a second request for data the page already holds.
+- **The comparison cannot swallow the dashboard.** The default city starts loading on page load; if it arrives after you have switched to Compare, the dashboard and its full-screen error stay hidden rather than covering the surface you are on.
 
 ---
 
@@ -224,13 +265,17 @@ This will start a local server at `http://127.0.0.1:3000/` and automatically lau
 
 ```text
 Test_001/
-├── index.html        # Semantic HTML5 app markup, ARIA wiring, City & Climate mode switchers
-├── styles.css        # Glassmorphic CSS styling, dynamic themes, climate results grid, reduced-motion support
-├── app.js            # Batch climate queries, unit-aware filter parser, weather controller
+├── index.html        # Semantic HTML5 app markup, ARIA wiring, City / Compare / Climate mode switchers
+├── styles.css        # Glassmorphic CSS styling, dynamic themes, climate results grid, comparison tables, reduced-motion support
+├── app.js            # Batch climate queries, unit-aware filter parser, weather controller, comparison UI
 ├── advice.js         # Personal Weather Assistant engine (pure, unit-agnostic, no DOM access)
+├── compare.js        # Compare Locations engine (pure: selection, metrics, thresholds, insights)
 ├── tests/
-│   ├── advice.test.js    # Recommendation logic: thresholds, units, scope, missing data, determinism
-│   └── wiring.test.js    # Dashboard glue: global, script order, element bindings, escaping, styling
+│   ├── advice.test.js         # Recommendation logic: thresholds, units, scope, missing data, determinism
+│   ├── wiring.test.js         # Dashboard glue: global, script order, element bindings, escaping, styling
+│   ├── compare.test.js        # Comparison engine: selection limits, per-column failure, thresholds, wording
+│   ├── compare-wiring.test.js # Comparison glue: script order, element ids, tab semantics, escaping, styling
+│   └── compare-runtime.test.js# App booted against a DOM stub: modes, fetch, retry, units, clearing
 ├── start-server.ps1  # Lightweight zero-dependency PowerShell static web server
 └── README.md         # Documentation and project overview
 ```
