@@ -1,6 +1,6 @@
 'use strict';
 /**
- * SkyCast Compare Locations - runtime tests
+ * WeatherScope Compare Locations - runtime tests
  * =========================================================================
  * The engine tests prove the comparison logic and the wiring tests prove the
  * markup and the source agree. Neither can catch the failure mode that actually
@@ -501,7 +501,7 @@ function flush(times = 8) {
 test('the app boots and reaches the compare surface without throwing', async () => {
   const app = bootApp(stubFetch());
 
-  assert.ok(app.sandbox.SkyCastCompare, 'the engine global must exist');
+  assert.ok(app.sandbox.WeatherScopeCompare, 'the engine global must exist');
   assert.doesNotThrow(() => app.el('tab-mode-compare').dispatch('click'));
 
   await flush();
@@ -517,7 +517,7 @@ test('the picker starts empty with every action correctly disabled', async () =>
   const app = bootApp(stubFetch());
   await flush();
 
-  const compare = app.sandbox.SkyCastCompare;
+  const compare = app.sandbox.WeatherScopeCompare;
   assert.equal(app.el('compare-run-btn').disabled, true, 'a comparison needs two locations');
   assert.equal(app.el('compare-add-btn').disabled, false, 'there is room to add a location');
   assert.equal(app.el('compare-clear-btn').disabled, true, 'nothing to clear yet');
@@ -554,7 +554,7 @@ test('every generated picker control is labelled and typed', async () => {
 
   // The empty state renders one "Add" placeholder per remaining slot.
   const emptyRows = app.el('compare-slots').querySelectorAll('compare-slot-empty');
-  assert.equal(emptyRows.length, app.sandbox.SkyCastCompare.THRESHOLDS.maxLocations);
+  assert.equal(emptyRows.length, app.sandbox.WeatherScopeCompare.THRESHOLDS.maxLocations);
 
   emptyRows.forEach((row) => {
     const add = row.querySelectorAll('compare-retry-btn')[0];

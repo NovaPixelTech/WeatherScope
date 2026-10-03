@@ -1,5 +1,5 @@
 /**
- * SkyCast "Today at a Glance" - Summary Engine
+ * WeatherScope "Today at a Glance" - Summary Engine
  * =========================================================================
  * The dashboard's first job is to be understood in two or three seconds. This
  * module turns the readings the app *already* has into that one screen: the
@@ -17,7 +17,7 @@
  *    `formatTemp` / `formatWindSpeed`), and the condition label comes from the
  *    app's own `WMO_MAP` lookup, so the card follows the active degC / degF
  *    toggle and the single source of weather wording exactly like the rest of
- *    SkyCast. Raw numbers stay in the Open-Meteo source units: Celsius, km/h,
+ *    WeatherScope. Raw numbers stay in the Open-Meteo source units: Celsius, km/h,
  *    mm, percent.
  *  * **Never guesses.** A missing reading renders as "--" and is excluded from
  *    the verdict; a payload with nothing usable at all returns `ok: false` so
@@ -26,7 +26,7 @@
  *    lives in `THRESHOLDS`.
  *
  * Loading contract: plain classic script (no build step). It publishes
- * `window.SkyCastGlance`, and also supports `module.exports` for the tests.
+ * `window.WeatherScopeGlance`, and also supports `module.exports` for the tests.
  */
 
 (function (root, factory) {
@@ -37,7 +37,7 @@
   if (typeof module === 'object' && module !== null && typeof module.exports === 'object') {
     module.exports = api;
   }
-  if (root) root.SkyCastGlance = api;
+  if (root) root.WeatherScopeGlance = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 

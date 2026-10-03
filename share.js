@@ -1,5 +1,5 @@
 /**
- * SkyCast Share Links - the deep-link encoder/decoder
+ * WeatherScope Share Links - the deep-link encoder/decoder
  * =========================================================================
  * The share button used to hand out `window.location.href`: the same generic
  * address for every city, which told the recipient nothing. A shared forecast is
@@ -25,7 +25,7 @@
  *    so a hand-edited or hostile link can only ever fail closed.
  *
  * Loading contract: plain classic script (no build step). It publishes
- * `window.SkyCastShare`, and also supports `module.exports` for the tests.
+ * `window.WeatherScopeShare`, and also supports `module.exports` for the tests.
  */
 
 (function (root, factory) {
@@ -36,7 +36,7 @@
   if (typeof module === 'object' && module !== null && typeof module.exports === 'object') {
     module.exports = api;
   }
-  if (root) root.SkyCastShare = api;
+  if (root) root.WeatherScopeShare = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 

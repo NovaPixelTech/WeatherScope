@@ -1,5 +1,5 @@
 /**
- * SkyCast Weather Application
+ * WeatherScope
  * Real-time meteorological dashboard & Global Climate Discovery Engine
  * Powered by Open-Meteo API
  */
@@ -115,10 +115,52 @@
   };
 
   // ==========================================================================
+  // Persisted keys
+  // --------------------------------------------------------------------------
+  // The app used to be called SkyCast, and its keys carried that name. They are
+  // now prefixed `weatherscope_`, but a visitor who already had a preferred unit
+  // or a last city must not silently lose it to a rename - so the old keys are
+  // moved across once, on first read, and only when the new key is still absent.
+  // ==========================================================================
+  const STORAGE_KEYS = {
+    unit: 'weatherscope_unit',
+    lastCity: 'weatherscope_last_city',
+    globalCache: 'weatherscope_global_cache',
+  };
+
+  const LEGACY_STORAGE_KEYS = {
+    unit: 'skycast_unit',
+    lastCity: 'skycast_last_city',
+    globalCache: 'skycast_global_cache',
+  };
+
+  /** Reads a key, adopting the pre-rename value on first sight of it. */
+  function readStored(key, legacyKey) {
+    const value = localStorage.getItem(key);
+    if (value !== null) {
+      // Already on the new key, so the new value wins - but the legacy key is
+      // still dropped, otherwise a stale copy would sit in storage forever.
+      localStorage.removeItem(legacyKey);
+      return value;
+    }
+    const legacy = localStorage.getItem(legacyKey);
+    if (legacy === null) return null;
+    localStorage.setItem(key, legacy);
+    localStorage.removeItem(legacyKey);
+    return legacy;
+  }
+
+  /** Writes a key, clearing the pre-rename one so it cannot come back to life. */
+  function writeStored(key, legacyKey, value) {
+    localStorage.setItem(key, value);
+    localStorage.removeItem(legacyKey);
+  }
+
+  // ==========================================================================
   // State Management
   // ==========================================================================
   const state = {
-    unit: localStorage.getItem('skycast_unit') || 'celsius', // 'celsius' or 'fahrenheit'
+    unit: readStored(STORAGE_KEYS.unit, LEGACY_STORAGE_KEYS.unit) || 'celsius', // 'celsius' or 'fahrenheit'
     searchMode: 'city', // 'city', 'compare' or 'climate'
     currentCity: null,
     weatherData: null,
@@ -164,7 +206,6 @@
     'theme-snowy',
   ];
 
-  const GLOBAL_CACHE_KEY = 'skycast_global_cache';
   const GLOBAL_CACHE_TTL = 5 * 60 * 1000;
   const REQUEST_TIMEOUT = 12000;
 
@@ -1269,7 +1310,17 @@
 
   function readGlobalCache() {
     try {
-      const raw = sessionStorage.getItem(GLOBAL_CACHE_KEY);
+      // The 72-city batch is a per-session cache, so its rename migration reads
+      // the legacy session key too rather than going through localStorage.
+      let raw = sessionStorage.getItem(STORAGE_KEYS.globalCache);
+      if (raw === null) {
+        const legacy = sessionStorage.getItem(LEGACY_STORAGE_KEYS.globalCache);
+        if (legacy !== null) {
+          sessionStorage.setItem(STORAGE_KEYS.globalCache, legacy);
+          sessionStorage.removeItem(LEGACY_STORAGE_KEYS.globalCache);
+          raw = legacy;
+        }
+      }
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (!parsed || !Array.isArray(parsed.entries) || !parsed.timestamp) return null;
@@ -1286,7 +1337,8 @@
 
   function writeGlobalCache(entries, timestamp) {
     try {
-      sessionStorage.setItem(GLOBAL_CACHE_KEY, JSON.stringify({ timestamp, entries }));
+      sessionStorage.setItem(STORAGE_KEYS.globalCache, JSON.stringify({ timestamp, entries }));
+      sessionStorage.removeItem(LEGACY_STORAGE_KEYS.globalCache);
     } catch {
       // sessionStorage may be unavailable (private mode / quota) - caching is optional
     }
@@ -1616,11 +1668,11 @@
 
   function renderGlance(data) {
     const card = elements.glanceCard;
-    if (!card || !window.SkyCastGlance) return;
+    if (!card || !window.WeatherScopeGlance) return;
 
     let glance = null;
     try {
-      glance = window.SkyCastGlance.build({
+      glance = window.WeatherScopeGlance.build({
         current: data.current,
         hourly: data.hourly,
         daily: data.daily,
@@ -1631,7 +1683,7 @@
     } catch (err) {
       // The engine is defensive by design, but a bug here must never take the
       // forecast down with it: the card simply stays hidden.
-      console.warn('SkyCast: the glance summary could not be built', err);
+      console.warn('WeatherScope: the glance summary could not be built', err);
       return;
     }
 
@@ -1688,7 +1740,7 @@
    */
   function renderGlanceWear(data) {
     const strip = elements.glanceWear;
-    if (!strip || !window.SkyCastAdvice) return;
+    if (!strip || !window.WeatherScopeAdvice) return;
 
     const profile = getAdviceProfile(data);
     const recommendations = getAdviceRecommendations(profile, state.adviceWindowKey);
@@ -2009,7 +2061,7 @@
    * formatters passed in decide what the visitor actually sees.
    */
   function getAdviceProfile(data) {
-    if (!window.SkyCastAdvice) return null;
+    if (!window.WeatherScopeAdvice) return null;
 
     const hourly = data.hourly;
     const current = data.current;
@@ -2023,7 +2075,7 @@
 
     let profile = null;
     try {
-      profile = window.SkyCastAdvice.analyze({
+      profile = window.WeatherScopeAdvice.analyze({
         hourly,
         currentTime: current ? current.time : null,
         format: adviceFormat(),
@@ -2031,7 +2083,7 @@
     } catch (err) {
       // The engine is defensive by design, but a bug here must never take the
       // forecast down with it: the card simply stays hidden.
-      console.warn('SkyCast: the Weather Assistant could not be analysed', err);
+      console.warn('WeatherScope: the Weather Assistant could not be analysed', err);
       return null;
     }
 
@@ -2046,7 +2098,7 @@
    * recomputed - the six tiles above it cannot change and are not re-painted.
    */
   function getAdviceRecommendations(profile, windowKey) {
-    if (!window.SkyCastAdvice || !profile) return null;
+    if (!window.WeatherScopeAdvice || !profile) return null;
 
     const cache = state.adviceCache;
     if (cache && cache.windowKey === windowKey && cache.recommendations) {
@@ -2055,9 +2107,9 @@
 
     let built = null;
     try {
-      built = window.SkyCastAdvice.getRecommendations(profile, windowKey);
+      built = window.WeatherScopeAdvice.getRecommendations(profile, windowKey);
     } catch (err) {
-      console.warn('SkyCast: the Weather Assistant could not be calculated', err);
+      console.warn('WeatherScope: the Weather Assistant could not be calculated', err);
       return null;
     }
 
@@ -2097,7 +2149,7 @@
     // --- Tiles --------------------------------------------------------------
     const grid = elements.assistantGrid;
     grid.innerHTML = '';
-    window.SkyCastAdvice.ADVICE_ORDER.forEach((key) => {
+    window.WeatherScopeAdvice.ADVICE_ORDER.forEach((key) => {
       const tile = recommendations.decisions[key];
       if (!tile) return;
 
@@ -2141,10 +2193,10 @@
 
   function renderAssistantWindowTabs() {
     const container = elements.assistantWindowTabs;
-    if (!container || !window.SkyCastAdvice) return;
+    if (!container || !window.WeatherScopeAdvice) return;
 
     container.innerHTML = '';
-    window.SkyCastAdvice.RAIN_WINDOWS.forEach((w) => {
+    window.WeatherScopeAdvice.RAIN_WINDOWS.forEach((w) => {
       const tab = document.createElement('button');
       tab.type = 'button';
       tab.className = 'assistant-window-tab';
@@ -2283,7 +2335,7 @@
   // recipient can see what was shared first and keep exploring afterwards.
   // ==========================================================================
   function shareEngine() {
-    return window.SkyCastShare || null;
+    return window.WeatherScopeShare || null;
   }
 
   /** Card key -> its section element. One key, one element, both directions. */
@@ -2499,7 +2551,7 @@
     if (payload.unit === 'f' && elements.unitF) elements.unitF.click();
     if (payload.unit === 'c' && elements.unitC) elements.unitC.click();
 
-    const windows = window.SkyCastAdvice && window.SkyCastAdvice.RAIN_WINDOWS;
+    const windows = window.WeatherScopeAdvice && window.WeatherScopeAdvice.RAIN_WINDOWS;
     const knownWindow = windows && windows.some(function (w) { return w.key === payload.windowKey; });
     if (knownWindow) state.adviceWindowKey = payload.windowKey;
 
@@ -2944,7 +2996,7 @@
 
   /** The engine, or null if the script failed to load. */
   function compareEngine() {
-    return window.SkyCastCompare || null;
+    return window.WeatherScopeCompare || null;
   }
 
   /** Slot captions: "Location A" ... "Location D". */
@@ -3793,7 +3845,7 @@ const icon = document.createElement('span');
       state.currentCity = city;
       state.weatherData = weatherData;
 
-      localStorage.setItem('skycast_last_city', JSON.stringify(city));
+      writeStored(STORAGE_KEYS.lastCity, LEGACY_STORAGE_KEYS.lastCity, JSON.stringify(city));
 
       elements.searchInput.value = city.name;
       elements.clearBtn.classList.remove('hidden');
@@ -4573,7 +4625,7 @@ const icon = document.createElement('span');
     function setUnit(newUnit) {
       if (state.unit === newUnit) return;
       state.unit = newUnit;
-      localStorage.setItem('skycast_unit', newUnit);
+      writeStored(STORAGE_KEYS.unit, LEGACY_STORAGE_KEYS.unit, newUnit);
 
       const useF = newUnit === 'fahrenheit';
       elements.unitF.classList.toggle('active', useF);
@@ -4688,7 +4740,7 @@ const icon = document.createElement('span');
     // It is fetched lazily the first time climate mode is used (#9).
 
     // Check for saved last city in localStorage
-    const saved = localStorage.getItem('skycast_last_city');
+    const saved = readStored(STORAGE_KEYS.lastCity, LEGACY_STORAGE_KEYS.lastCity);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);

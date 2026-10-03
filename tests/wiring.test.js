@@ -1,6 +1,6 @@
 'use strict';
 /**
- * SkyCast Weather Assistant - dashboard wiring tests
+ * WeatherScope Weather Assistant - dashboard wiring tests
  * =========================================================================
  * The engine is pure, so what can still break is the glue: the browser global,
  * the script order, the element ids the app binds, the placement of the card,
@@ -32,7 +32,7 @@ function loadAsBrowserGlobal() {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(read('advice.js'), sandbox);
-  return sandbox.SkyCastAdvice || sandbox.window.SkyCastAdvice;
+  return sandbox.WeatherScopeAdvice || sandbox.window.WeatherScopeAdvice;
 }
 
 const Advice = loadAsBrowserGlobal();
@@ -41,7 +41,7 @@ const Advice = loadAsBrowserGlobal();
 // 1. Script loading
 // ==========================================================================
 test('advice.js registers itself as a browser global', () => {
-  assert.ok(Advice, 'SkyCastAdvice global is missing');
+  assert.ok(Advice, 'WeatherScopeAdvice global is missing');
   assert.equal(typeof Advice.getAdviceBundle, 'function');
   assert.equal(typeof Advice.getRecommendations, 'function');
   assert.equal(typeof Advice.analyze, 'function');

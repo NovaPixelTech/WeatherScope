@@ -1,4 +1,4 @@
-# Simple lightweight local static HTTP server for SkyCast Weather
+# Simple lightweight local static HTTP server for WeatherScope
 param (
     [int]$Port = 3000
 )
@@ -27,7 +27,7 @@ try {
 }
 
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host " SkyCast Weather App Server Running!" -ForegroundColor Green
+Write-Host " WeatherScope App Server Running!" -ForegroundColor Green
 Write-Host " URL: $Url" -ForegroundColor Yellow
 Write-Host " Press Ctrl+C in this terminal to stop." -ForegroundColor Gray
 Write-Host "==========================================" -ForegroundColor Cyan

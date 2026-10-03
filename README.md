@@ -1,8 +1,30 @@
-# SkyCast Weather 🌦️
+# WeatherScope 🌦️
 
 A modern, fast, and responsive weather web application that allows you to search real-time weather conditions by **City Name** or discover worldwide cities that meet your **Preferred Climate & Weather Conditions** (e.g., Sunny, Warm, Rain, Snow, Hot > 28°C, Cold < 12°C).
 
-Powered by the [Open-Meteo API](https://open-meteo.com/), SkyCast operates with zero API key configuration or setup friction.
+Powered by the [Open-Meteo API](https://open-meteo.com/), WeatherScope operates with zero API key configuration or setup friction.
+
+---
+
+## 🎯 The mark
+
+The app is named **WeatherScope**, and its icon is a **radar scope showing the weather** — a name and a picture that mean the same thing.
+
+![The WeatherScope mark](favicon.svg)
+
+| Layer | What it is | Why |
+| --- | --- | --- |
+| **Scope ring** | A cyan-to-blue rim around a dark navy disc | A radar scope, and the "scope" half of the name. The dark disc is what makes the mark legible on both light and dark browser chrome. |
+| **Sweeping beam** | A soft gradient wedge that rotates once every 4.5s | Weather radar is instantly recognisable. It is the one moving part of the logo, and the global `prefers-reduced-motion` rule stops it for anyone who has asked for less motion. |
+| **Range rings & ticks** | One inner ring plus four crosshair ticks | The instrument-panel detail that sells "scope" at large sizes. |
+| **Cloud + two drops** | A white cloud with rain, dead centre | The weather, held inside the instrument. White-on-navy gives it a **10.3:1** contrast ratio, so it survives a 16px favicon. |
+
+The mark lives in one 32×32 `viewBox` and scales without loss to any size. It is written twice on purpose — inline in the header, and as `favicon.svg` for the tab — because an external `<use>` reference would be blocked by CORS when `index.html` is opened straight off the disk with `file://`.
+
+| File | Role |
+| --- | --- |
+| `favicon.svg` | Tab / shortcut icon, and the scalable master of the mark. |
+| `apple-touch-icon.png` | 180×180 rendered from the same SVG for iOS home screens and bookmarks. |
 
 ---
 
@@ -361,6 +383,8 @@ This will start a local server at `http://127.0.0.1:3000/` and automatically lau
 Test_001/
 ├── index.html        # Semantic HTML5 app markup, ARIA wiring, City / Compare / Climate mode switchers
 ├── styles.css        # Glassmorphic CSS styling, dynamic themes, climate results grid, comparison tables, reduced-motion support
+├── favicon.svg       # The radar-scope mark, and the scalable master of the logo
+├── apple-touch-icon.png # 180x180 render of the same mark for iOS
 ├── app.js            # Batch climate queries, unit-aware filter parser, weather controller, comparison UI
 ├── glance.js         # "Today at a glance" engine (pure: current conditions, today's rain peak, verdict)
 ├── advice.js         # Personal Weather Assistant engine (pure, unit-agnostic, no DOM access)
@@ -374,7 +398,30 @@ Test_001/
 │   ├── compare.test.js        # Comparison engine: selection limits, per-column failure, thresholds, wording
 │   ├── compare-wiring.test.js # Comparison glue: script order, element ids, tab semantics, escaping, styling
 │   ├── compare-runtime.test.js# App booted against a DOM stub: modes, fetch, retry, units, clearing
-│   └── share.test.js          # Share links: deep-link format, card vocabulary, hostile params, arrival wiring
+│   ├── share.test.js          # Share links: deep-link format, card vocabulary, hostile params, arrival wiring
+│   └── storage-keys.test.js   # The SkyCast rename: legacy unit/city/cache migration, and that it never clobbers
 ├── start-server.ps1  # Lightweight zero-dependency PowerShell static web server
 └── README.md         # Documentation and project overview
+```
+
+---
+
+## 🔁 Renamed from SkyCast
+
+The app used to be called **SkyCast**. The rename touched three separate layers, because each one is easy to miss:
+
+| Layer | Before | After |
+| --- | --- | --- |
+| **What you see** | Page title, `<noscript>` notice, header wordmark, README, server banner | `WeatherScope` |
+| **What the code exposes** | `window.SkyCastAdvice` / `SkyCastGlance` / `SkyCastCompare` / `SkyCastShare` | `window.WeatherScopeAdvice` / `WeatherScopeGlance` / `WeatherScopeCompare` / `WeatherScopeShare` |
+| **What it remembers** | `skycast_unit`, `skycast_last_city`, `skycast_global_cache` | `weatherscope_*` |
+
+The storage keys are the only part that could actually hurt someone, so they are migrated rather than renamed in place. `readStored()` / `writeStored()` at the top of `app.js` adopt a pre-rename value the first time the new key is read, write everything new under the new name, and delete the old key on the way through. A value already stored under the new name always wins, so a half-migrated profile can never regress. `tests/storage-keys.test.js` holds all of that in place — it boots the real `app.js` against a seeded storage map.
+
+Nothing about you is stored beyond the unit toggle and the last city you looked at, and the selected rain window remains session-only.
+
+### Running the tests
+
+```powershell
+node --test
 ```

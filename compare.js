@@ -1,5 +1,5 @@
 /**
- * SkyCast Compare Locations - Comparison Engine
+ * WeatherScope Compare Locations - Comparison Engine
  * =========================================================================
  * Answers one question - *"What's the weather like in these places, and how
  * different are they?"* - from the Open-Meteo payloads the app already
@@ -15,7 +15,7 @@
  *    rendered through caller-injected formatters (app.js passes `formatTemp`,
  *    `formatWindSpeed`, `formatPrecip`, ...) and its existing WMO lookup, so the
  *    comparison follows the active degC / degF toggle and the single WMO_MAP
- *    exactly like the rest of SkyCast. Every raw number handled here stays in
+ *    exactly like the rest of WeatherScope. Every raw number handled here stays in
  *    the Open-Meteo source units: Celsius, km/h, mm, percent.
  *  * **Never guesses.** A location whose readings are missing or whose request
  *    failed becomes an explicit "unavailable" column rather than a silent zero,
@@ -24,7 +24,7 @@
  *    is worth telling the user about lives in `THRESHOLDS`.
  *
  * Loading contract: plain classic script (no build step). It publishes
- * `window.SkyCastCompare`, and also supports `module.exports` for the tests.
+ * `window.WeatherScopeCompare`, and also supports `module.exports` for the tests.
  */
 
 (function (root, factory) {
@@ -35,7 +35,7 @@
   if (typeof module === 'object' && module !== null && typeof module.exports === 'object') {
     module.exports = api;
   }
-  if (root) root.SkyCastCompare = api;
+  if (root) root.WeatherScopeCompare = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 

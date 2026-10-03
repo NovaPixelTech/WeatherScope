@@ -1,6 +1,6 @@
 'use strict';
 /**
- * SkyCast share links - link format + dashboard wiring tests
+ * WeatherScope share links - link format + dashboard wiring tests
  * =========================================================================
  * The share button used to send `window.location.href`, i.e. the same generic
  * address for every city. What has to be true now is that the link *is* the
@@ -35,7 +35,7 @@ function loadAsBrowserGlobal() {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(read('share.js'), sandbox);
-  return sandbox.SkyCastShare || sandbox.window.SkyCastShare;
+  return sandbox.WeatherScopeShare || sandbox.window.WeatherScopeShare;
 }
 
 const Share = loadAsBrowserGlobal();
@@ -63,7 +63,7 @@ const TOKYO = {
 // 1. Script loading
 // ==========================================================================
 test('share.js registers itself as a browser global', () => {
-  assert.ok(Share, 'SkyCastShare global is missing');
+  assert.ok(Share, 'WeatherScopeShare global is missing');
   assert.equal(typeof Share.buildShareUrl, 'function');
   assert.equal(typeof Share.parseShareLink, 'function');
   assert.deepEqual(list(Share.CARD_KEYS), ['glance', 'hero', 'assistant', 'metrics', 'hourly', 'daily']);
@@ -84,10 +84,10 @@ test('share.js is loaded before app.js so the global exists at init', () => {
 // 2. The link names the city and the cards
 // ==========================================================================
 test('the built link carries the city, its coordinates and the shared cards', () => {
-  const url = Share.buildShareUrl('https://skycast.test/index.html', TOKYO);
+  const url = Share.buildShareUrl('https://weatherscope.test/index.html', TOKYO);
   const parsed = Share.parseShareLink(url);
 
-  assert.ok(url.startsWith('https://skycast.test/index.html?'), url);
+  assert.ok(url.startsWith('https://weatherscope.test/index.html?'), url);
   assert.equal(parsed.city, 'Tokyo');
   assert.equal(parsed.country, 'Japan');
   assert.equal(parsed.latitude, 35.6762);
@@ -99,14 +99,14 @@ test('the built link carries the city, its coordinates and the shared cards', ()
 });
 
 test('the link is never the bare page address', () => {
-  const url = Share.buildShareUrl('https://skycast.test/index.html', TOKYO);
-  assert.notEqual(url, 'https://skycast.test/index.html');
+  const url = Share.buildShareUrl('https://weatherscope.test/index.html', TOKYO);
+  assert.notEqual(url, 'https://weatherscope.test/index.html');
   assert.match(url, /city=Tokyo/);
   assert.match(url, /cards=glance%2Chourly|/, url);
 });
 
 test('re-sharing replaces the previous link instead of stacking parameters', () => {
-  const first = Share.buildShareUrl('https://skycast.test/index.html', TOKYO);
+  const first = Share.buildShareUrl('https://weatherscope.test/index.html', TOKYO);
   const second = Share.buildShareUrl(first, Object.assign({}, TOKYO, { city: 'Oslo', latitude: 59.9139, longitude: 10.7522 }));
 
   assert.equal(second.match(/city=/g).length, 1, second);
@@ -115,25 +115,25 @@ test('re-sharing replaces the previous link instead of stacking parameters', () 
 });
 
 test('a link read back and written out again is byte-identical', () => {
-  const once = Share.buildShareUrl('https://skycast.test/index.html', TOKYO);
-  const twice = Share.buildShareUrl('https://skycast.test/index.html', Share.parseShareLink(once));
+  const once = Share.buildShareUrl('https://weatherscope.test/index.html', TOKYO);
+  const twice = Share.buildShareUrl('https://weatherscope.test/index.html', Share.parseShareLink(once));
   assert.equal(twice, once);
 });
 
 test('a link survives a non-http base such as a file:// page', () => {
-  const url = Share.buildShareUrl('file:///C:/apps/skycast/index.html', TOKYO);
-  assert.match(url, /^file:\/\/\/C:\/apps\/skycast\/index\.html\?/);
+  const url = Share.buildShareUrl('file:///C:/apps/weatherscope/index.html', TOKYO);
+  assert.match(url, /^file:\/\/\/C:\/apps\/weatherscope\/index\.html\?/);
   assert.equal(Share.parseShareLink(url).city, 'Tokyo');
 });
 
 test('a stale hash is dropped rather than carried into the share', () => {
-  const url = Share.buildShareUrl('https://skycast.test/index.html#some-anchor', TOKYO);
+  const url = Share.buildShareUrl('https://weatherscope.test/index.html#some-anchor', TOKYO);
   assert.equal(url.indexOf('#'), -1, url);
 });
 
 test('a payload with no city produces no link at all', () => {
-  assert.equal(Share.buildShareUrl('https://skycast.test/index.html', { latitude: 10, longitude: 10 }), '');
-  assert.equal(Share.buildShareUrl('https://skycast.test/index.html', {}), '');
+  assert.equal(Share.buildShareUrl('https://weatherscope.test/index.html', { latitude: 10, longitude: 10 }), '');
+  assert.equal(Share.buildShareUrl('https://weatherscope.test/index.html', {}), '');
 });
 
 // ==========================================================================
@@ -148,7 +148,7 @@ test('an unknown card is dropped, and a link with no usable card shows the city'
   assert.deepEqual(list(Share.sanitizeCards(['glance', 'evil', 'hourly'])), ['glance', 'hourly']);
   assert.deepEqual(list(Share.sanitizeCards(['evil'])), list(Share.CARD_KEYS));
   assert.deepEqual(list(Share.sanitizeCards([])), list(Share.CARD_KEYS));
-  assert.deepEqual(list(Share.parseShareLink('https://skycast.test/i.html?city=Oslo').cards), list(Share.CARD_KEYS));
+  assert.deepEqual(list(Share.parseShareLink('https://weatherscope.test/i.html?city=Oslo').cards), list(Share.CARD_KEYS));
 });
 
 test('the card names read back as a sentence for the banner', () => {
@@ -159,20 +159,20 @@ test('the card names read back as a sentence for the banner', () => {
 // 4. Nothing off the wire is trusted
 // ==========================================================================
 test('a URL that does not name a city is not a shared forecast', () => {
-  assert.equal(Share.parseShareLink('https://skycast.test/index.html'), null);
-  assert.equal(Share.parseShareLink('https://skycast.test/index.html?lat=35.6&lon=139.6'), null);
-  assert.equal(Share.isShareLink('https://skycast.test/index.html?city=Oslo'), true);
-  assert.equal(Share.isShareLink('https://skycast.test/index.html'), false);
+  assert.equal(Share.parseShareLink('https://weatherscope.test/index.html'), null);
+  assert.equal(Share.parseShareLink('https://weatherscope.test/index.html?lat=35.6&lon=139.6'), null);
+  assert.equal(Share.isShareLink('https://weatherscope.test/index.html?city=Oslo'), true);
+  assert.equal(Share.isShareLink('https://weatherscope.test/index.html'), false);
 });
 
 test('half a coordinate pair is dropped rather than guessed at', () => {
-  const parsed = Share.parseShareLink('https://skycast.test/index.html?city=Oslo&lat=59.91');
+  const parsed = Share.parseShareLink('https://weatherscope.test/index.html?city=Oslo&lat=59.91');
   assert.equal(parsed.latitude, null);
   assert.equal(parsed.longitude, null);
 });
 
 test('nonsense coordinates and units are rejected', () => {
-  const parsed = Share.parseShareLink('https://skycast.test/index.html?city=Oslo&lat=999&lon=10&unit=kelvin&cards=glance');
+  const parsed = Share.parseShareLink('https://weatherscope.test/index.html?city=Oslo&lat=999&lon=10&unit=kelvin&cards=glance');
   assert.equal(parsed.latitude, null, 'a latitude past the pole is not a place');
   assert.equal(parsed.longitude, null);
   assert.equal(parsed.unit, '', 'an unknown unit falls back to the visitor\'s own');
@@ -180,12 +180,12 @@ test('nonsense coordinates and units are rejected', () => {
 });
 
 test('the full unit names are accepted as well as the short ones', () => {
-  assert.equal(Share.parseShareLink('https://skycast.test/index.html?city=Oslo&unit=fahrenheit').unit, 'f');
-  assert.equal(Share.parseShareLink('https://skycast.test/index.html?city=Oslo&unit=C').unit, 'c');
+  assert.equal(Share.parseShareLink('https://weatherscope.test/index.html?city=Oslo&unit=fahrenheit').unit, 'f');
+  assert.equal(Share.parseShareLink('https://weatherscope.test/index.html?city=Oslo&unit=C').unit, 'c');
 });
 
 test('a city name cannot smuggle control characters into the page', () => {
-  const parsed = Share.parseShareLink('https://skycast.test/index.html?city=Oslo%0ANew%20York');
+  const parsed = Share.parseShareLink('https://weatherscope.test/index.html?city=Oslo%0ANew%20York');
   assert.equal(parsed, null);
 });
 
@@ -274,7 +274,7 @@ test('opening a link applies it before the saved or default city', () => {
   );
 
   const shared = block.indexOf('parseShareLink(window.location.href)');
-  const saved = block.indexOf('skycast_last_city');
+  const saved = block.indexOf('readStored(STORAGE_KEYS.lastCity');
   const fallback = block.indexOf("name: 'Paris'");
 
   assert.ok(shared > -1, 'init never reads the shared link');

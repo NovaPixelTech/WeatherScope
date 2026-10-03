@@ -1,5 +1,5 @@
 /* ==========================================================================
-   SkyCast Weather - Modern Glassmorphic Stylesheet (High Contrast & Legibility)
+   WeatherScope - Modern Glassmorphic Stylesheet (High Contrast & Legibility)
    ========================================================================== */
 
 :root {
@@ -354,6 +354,24 @@ body {
 .brand-icon svg {
   width: 30px;
   height: 30px;
+}
+
+/* The mark is a radar scope, so its beam sweeps. `transform-origin: 50% 50%`
+   resolves against the SVG viewport, which is centred on the scope (16, 16) -
+   not against the beam's own bounding box, which is offset into one quadrant.
+   The global prefers-reduced-motion block at the end of this file stops it. */
+.brand-icon .ws-sweep {
+  transform-origin: 50% 50%;
+  animation: ws-radar-sweep 4.5s linear infinite;
+}
+
+@keyframes ws-radar-sweep {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .brand-title {
@@ -2549,7 +2567,7 @@ body {
    One section, three surfaces: the location picker (built from the existing
    chip/button language), the "at a glance" summary, and the comparison tables.
    Everything reuses the existing design tokens, radii and card treatment, so
-   the feature reads as part of SkyCast rather than a second app.
+   the feature reads as part of WeatherScope rather than a second app.
    ========================================================================== */
 .compare-section {
   display: flex;

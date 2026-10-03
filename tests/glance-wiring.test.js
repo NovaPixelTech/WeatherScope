@@ -1,6 +1,6 @@
 'use strict';
 /**
- * SkyCast "Today at a Glance" - dashboard wiring tests
+ * WeatherScope "Today at a Glance" - dashboard wiring tests
  * =========================================================================
  * The engine is pure, so what can still break is the glue: the browser global,
  * the script order, the element ids the app binds, the placement of the card,
@@ -33,7 +33,7 @@ function loadAsBrowserGlobal() {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(read('glance.js'), sandbox);
-  return sandbox.SkyCastGlance || sandbox.window.SkyCastGlance;
+  return sandbox.WeatherScopeGlance || sandbox.window.WeatherScopeGlance;
 }
 
 const Glance = loadAsBrowserGlobal();
@@ -42,7 +42,7 @@ const Glance = loadAsBrowserGlobal();
 // 1. Script loading
 // ==========================================================================
 test('glance.js registers itself as a browser global', () => {
-  assert.ok(Glance, 'SkyCastGlance global is missing');
+  assert.ok(Glance, 'WeatherScopeGlance global is missing');
   assert.equal(typeof Glance.build, 'function');
   assert.ok(Glance.THRESHOLDS);
   assert.ok(Glance.VERDICTS.good);
@@ -187,7 +187,7 @@ test('the glance mirrors the clothing tile instead of re-analysing the forecast'
   assert.ok(block.length > 0, 'renderGlanceWear was not found');
   assert.match(block, /getAdviceProfile\(data\)/, 'it must reuse the memoised profile');
   assert.match(block, /\.clothing/, 'it reads the clothing decision');
-  assert.doesNotMatch(block, /SkyCastAdvice\.analyze\(/, 'the hourly payload must not be analysed twice');
+  assert.doesNotMatch(block, /WeatherScopeAdvice\.analyze\(/, 'the hourly payload must not be analysed twice');
 });
 
 test('the assistant card is untouched: it still builds its own clothing tile', () => {
@@ -195,7 +195,7 @@ test('the assistant card is untouched: it still builds its own clothing tile', (
   const order = (advice.match(/const ADVICE_ORDER = \[([^\]]*)\]/) || [])[1] || '';
 
   assert.ok(order.includes('clothing'), 'the clothing tile is still in the assistant grid');
-  assert.match(appSource, /window\.SkyCastAdvice\.ADVICE_ORDER\.forEach/, 'the assistant still renders its tiles');
+  assert.match(appSource, /window\.WeatherScopeAdvice\.ADVICE_ORDER\.forEach/, 'the assistant still renders its tiles');
   assert.match(appSource, /getElementById\('glance-wear'\)/, 'the glance strip has its own binding');
 });
 
