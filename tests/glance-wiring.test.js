@@ -75,6 +75,10 @@ test('every element the glance renders into exists and is bound', () => {
     'glance-verdict-icon',
     'glance-verdict-headline',
     'glance-verdict-detail',
+    'glance-wear',
+    'glance-wear-icon',
+    'glance-wear-headline',
+    'glance-wear-detail',
   ];
 
   ids.forEach((id) => {
@@ -94,6 +98,16 @@ test('the glance card is the first card in the dashboard', () => {
   assert.ok(dashboard !== -1 && glance !== -1 && hero !== -1);
   assert.ok(dashboard < glance, 'the glance must live inside the dashboard');
   assert.ok(glance < hero, '"Today at a glance" must come before the hero card');
+});
+
+test('"what to wear" sits under the verdict, inside the glance card', () => {
+  const verdict = html.indexOf('id="glance-verdict"');
+  const wear = html.indexOf('id="glance-wear"');
+  const hero = html.indexOf('id="hero-card"');
+
+  assert.ok(verdict !== -1 && wear !== -1, 'the wear strip is missing from index.html');
+  assert.ok(verdict < wear, 'the clothing answer belongs under the verdict');
+  assert.ok(wear < hero, 'the wear strip must stay inside the glance card');
 });
 
 test('the card starts hidden so a refresh never flashes yesterday\'s answer', () => {
@@ -140,6 +154,11 @@ test('every glance class the renderer uses is styled', () => {
     'glance-verdict-label',
     'glance-verdict-headline',
     'glance-verdict-detail',
+    'glance-wear',
+    'glance-wear-icon',
+    'glance-wear-label',
+    'glance-wear-headline',
+    'glance-wear-detail',
   ].forEach((name) => {
     assert.ok(css.includes(`.${name}`), `.${name} has no styles`);
   });
@@ -149,6 +168,35 @@ test('every tone the engine can emit has a visible colour', () => {
   ['good', 'caution', 'warn', 'bad', 'unknown'].forEach((tone) => {
     assert.match(css, new RegExp(`\\.glance-verdict\\[data-tone='${tone}'\\]`), `tone ${tone} is unstyled`);
   });
+});
+
+test('the wear strip starts hidden and colours every tone it can inherit', () => {
+  assert.match(html, /<div class="glance-wear" id="glance-wear"[^>]*hidden/);
+  assert.match(css, /\.glance-wear\[hidden\]\s*\{\s*display:\s*none;/);
+  ['good', 'caution', 'warn', 'bad', 'unknown'].forEach((tone) => {
+    assert.match(css, new RegExp(`\\.glance-wear\\[data-tone='${tone}'\\]`), `tone ${tone} is unstyled`);
+  });
+});
+
+test('the glance mirrors the clothing tile instead of re-analysing the forecast', () => {
+  const block = appSource.slice(
+    appSource.indexOf('function renderGlanceWear('),
+    appSource.indexOf('function generateShareText(')
+  );
+
+  assert.ok(block.length > 0, 'renderGlanceWear was not found');
+  assert.match(block, /getAdviceProfile\(data\)/, 'it must reuse the memoised profile');
+  assert.match(block, /\.clothing/, 'it reads the clothing decision');
+  assert.doesNotMatch(block, /SkyCastAdvice\.analyze\(/, 'the hourly payload must not be analysed twice');
+});
+
+test('the assistant card is untouched: it still builds its own clothing tile', () => {
+  const advice = read('advice.js');
+  const order = (advice.match(/const ADVICE_ORDER = \[([^\]]*)\]/) || [])[1] || '';
+
+  assert.ok(order.includes('clothing'), 'the clothing tile is still in the assistant grid');
+  assert.match(appSource, /window\.SkyCastAdvice\.ADVICE_ORDER\.forEach/, 'the assistant still renders its tiles');
+  assert.match(appSource, /getElementById\('glance-wear'\)/, 'the glance strip has its own binding');
 });
 
 test('the spoken-only metric hint is genuinely hidden, not just small', () => {

@@ -634,6 +634,10 @@
     glanceVerdictIcon: document.getElementById('glance-verdict-icon'),
     glanceVerdictHeadline: document.getElementById('glance-verdict-headline'),
     glanceVerdictDetail: document.getElementById('glance-verdict-detail'),
+    glanceWear: document.getElementById('glance-wear'),
+    glanceWearIcon: document.getElementById('glance-wear-icon'),
+    glanceWearHeadline: document.getElementById('glance-wear-headline'),
+    glanceWearDetail: document.getElementById('glance-wear-detail'),
 
     cityName: document.getElementById('city-name'),
     locationMeta: document.getElementById('location-meta'),
@@ -1639,6 +1643,44 @@
     elements.glanceVerdictIcon.textContent = verdict.icon || '';
     elements.glanceVerdictHeadline.textContent = verdict.text;
     elements.glanceVerdictDetail.textContent = verdict.detail || '';
+
+    // --- What to wear --------------------------------------------------------
+    renderGlanceWear(data);
+  }
+
+  /**
+   * "What to wear" - the Personal Weather Assistant's clothing tile, mirrored
+   * into one line under the verdict.
+   *
+   * Both cards read the same decision: `getAdviceProfile` is memoised on the
+   * hourly payload, so this costs nothing and the two can never disagree. The
+   * assistant card keeps its own tile - this is a summary, not a move - and
+   * because clothing does not depend on the selected time window, switching
+   * windows in the assistant leaves this line correct as it stands.
+   *
+   * A city with no usable hourly data hides the strip instead of showing a
+   * placeholder.
+   */
+  function renderGlanceWear(data) {
+    const strip = elements.glanceWear;
+    if (!strip || !window.SkyCastAdvice) return;
+
+    const profile = getAdviceProfile(data);
+    const recommendations = getAdviceRecommendations(profile, state.adviceWindowKey);
+    const clothing = recommendations && recommendations.decisions
+      ? recommendations.decisions.clothing
+      : null;
+
+    if (!clothing || !clothing.headline) {
+      strip.hidden = true;
+      return;
+    }
+
+    strip.hidden = false;
+    strip.dataset.tone = clothing.tone || 'unknown';
+    elements.glanceWearIcon.textContent = clothing.icon || '👕';
+    elements.glanceWearHeadline.textContent = clothing.headline;
+    elements.glanceWearDetail.textContent = clothing.detail || '';
   }
 
   /**

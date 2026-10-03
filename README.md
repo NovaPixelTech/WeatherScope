@@ -13,7 +13,7 @@ Powered by the [Open-Meteo API](https://open-meteo.com/), SkyCast operates with 
 1. **City Search Mode**:
    - Real-time debounced autocomplete suggestions showing matching cities, regions, and countries.
    - Enter key or quick search for any city on Earth.
-   - One-click chips for 20 popular global cities, kept in strict **A-Z order** (Athens → Tokyo) and rendered as a uniformly sized grid, so every button lines up horizontally and vertically.
+   - One-click chips for 20 popular global cities, kept in strict **A-Z order** (Athens → Tokyo) and rendered as a uniformly sized grid, so every button lines up horizontally and vertically. The bar sits at the **foot of the page**, below every card, so it reads as the "somewhere else?" shortcut instead of competing with the header.
    - One-click GPS location detection with reverse geocoding.
 
 2. **Compare Locations Mode (New! 🎉)**: pick 2–4 places and read them side by side — see [Compare Locations](#-compare-locations).
@@ -67,6 +67,7 @@ The first card on the dashboard answers the only question that matters before th
 | **Wind** | Current speed with its cardinal direction. |
 | **Humidity** | Relative humidity. |
 | **Verdict** | An icon, a headline and one sentence: 👍 *Good weather* — "Mostly dry and comfortable around 16°C with a breeze." / ☔ *Umbrella recommended* — "Rain peaks at 75% around 15:00." |
+| 👕 **What to wear** | The assistant's clothing answer in one line, directly under the verdict: *Warm jacket + umbrella* — "Cold and wet - around 4-8°C with rain expected." |
 
 ### The verdict ladder
 
@@ -92,10 +93,11 @@ A rain *code* alone can never talk you into carrying an umbrella: with a reporte
 - **"Today" really means today.** The hourly rows are filtered to the city's *current local day* from `current.time` onwards, so a reading at 23:00 is judged on the evening rather than on the whole 24-hour payload; the daily block is only a fallback for payloads with no usable hourly rows.
 - **Missing is not zero.** An absent reading renders as `--`, is left out of the verdict, and never becomes a confident guess; if neither temperature nor a weather code is usable the card hides itself instead of painting an empty shell.
 - **Accessible by construction.** The card is a `role="status"` live region, the metric tiles are a `role="list"` with screen-reader hints that spell out what each number means ("peak chance today"), and the verdict icon is `aria-hidden` because the headline already says the same thing.
+- **The "what to wear" line is a mirror, not a move.** It sits under the verdict because that is the question it answers, and it is painted from the assistant's memoised `clothing` decision — so the two cards cost one analysis and can never disagree. The assistant card keeps its own tile: the glance copy is a summary, nothing was moved out of it. Clothing does not depend on the selected rain window, so switching windows in the assistant leaves the glance line correct without a repaint.
 
 ### Running the tests
 
-`tests/glance.test.js` covers the logic (metric fallbacks, today's rain peak and its hour, the verdict ladder and its precedence, unit delegation, hostile payloads) and `tests/glance-wiring.test.js` covers the glue (browser global, script order, element bindings, card placement, `textContent` escaping, styling and the accessibility wiring):
+`tests/glance.test.js` covers the logic (metric fallbacks, today's rain peak and its hour, the verdict ladder and its precedence, unit delegation, hostile payloads) and `tests/glance-wiring.test.js` covers the glue (browser global, script order, element bindings, card and sub-card placement, `textContent` escaping, styling and the accessibility wiring):
 
 ```powershell
 node --test
@@ -286,7 +288,7 @@ Key properties:
 
 ## 🔲 Preset button grid
 
-Both the *Popular Cities* and *Preset Climates* bars are rendered by one shared CSS contract rather than free-flowing flex pills:
+Both the *Popular Cities* (at the foot of the page, below `main`) and *Preset Climates* bars are rendered by one shared CSS contract rather than free-flowing flex pills:
 
 - **Horizontal alignment** comes from CSS Grid tracks (`1fr`), not intrinsic button widths — a short label like `Tokyo` can never leave a ragged gap that pushes a button out of line with the row above it.
 - **Vertical alignment** comes from a fixed chip box (`height: 38px`), so every row is pixel-identical.

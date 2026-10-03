@@ -1720,6 +1720,68 @@ body {
   color: var(--text-secondary);
 }
 
+/* --- What to wear --------------------------------------------------------
+   The assistant's clothing tile in one line, sitting directly under the
+   verdict. Quieter than the verdict box on purpose: it is the follow-up, not
+   the headline, and it carries the same tone colours so "cold and wet" reads
+   the same way in both cards. */
+
+.glance-wear {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  background: rgba(18, 30, 56, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-left: 4px solid var(--glance-wear-tone, var(--accent-cyan));
+}
+
+.glance-wear[hidden] {
+  display: none;
+}
+
+.glance-wear[data-tone='good'] { --glance-wear-tone: var(--accent-emerald); }
+.glance-wear[data-tone='caution'] { --glance-wear-tone: var(--accent-blue); }
+.glance-wear[data-tone='warn'] { --glance-wear-tone: var(--accent-yellow); }
+.glance-wear[data-tone='bad'] { --glance-wear-tone: var(--accent-rose); }
+.glance-wear[data-tone='unknown'] { --glance-wear-tone: var(--text-dim); }
+
+.glance-wear-icon {
+  font-size: 1.2rem;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+.glance-wear-text {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.glance-wear-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.glance-wear-headline {
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.glance-wear-detail {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
 /* ==========================================================================
    Metrics Section (Cards Grid)
    ========================================================================== */
