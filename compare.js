@@ -553,8 +553,10 @@
         };
       });
 
-      // A subtle, neutral marker on the extremes of a row - never a
-      // "good"/"bad" colour, because neither end is better than the other.
+      // Mark the extremes by rank only - 'high' / 'low', never "good" or
+      // "bad", because neither end of a range is preferable. How a marked
+      // value looks is the view layer's decision; the engine only says which
+      // end of the row a reading sits on.
       const span = spread(metric, columns);
       if (span.notable) {
         span.high.forEach((index) => {

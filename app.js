@@ -2415,6 +2415,18 @@
   /** Slot captions: "Location A" ... "Location D". */
   const COMPARE_SLOT_LABELS = ['A', 'B', 'C', 'D'];
 
+  /**
+   * How a row extreme is announced and drawn.
+   *
+   * `glyph` is the redundant, non-colour cue (WCAG 1.4.1): the pill is already
+   * white-on-green / white-on-red, and the arrow keeps the two apart in
+   * greyscale, for colour-blind readers and on a washed-out screen.
+   */
+  const COMPARE_EMPHASIS = {
+    high: { word: 'highest', glyph: '▲' },
+    low: { word: 'lowest', glyph: '▼' },
+  };
+
   // Picker row icons. Static markup, matching the inline 24px stroke style used
   // elsewhere in the app; `compareIconButton` sets an accessible name on the
   // button itself, so these stay aria-hidden by inheriting the button's label.
@@ -2994,7 +3006,7 @@ const icon = document.createElement('span');
       const rowCells = row.cells.map(() => {
         const td = document.createElement('td');
         tr.appendChild(td);
-        return { td, mode: null, value: null, errorText: null };
+        return { td, mode: null, value: null, valueText: null, flag: null, errorText: null };
       });
 
       tbody.appendChild(tr);
@@ -3044,7 +3056,7 @@ const icon = document.createElement('span');
       const rowCells = refs.cells[rowIndex];
       if (!rowCells) return;
       row.cells.forEach((cell, colIndex) => {
-        paintCompareCell(rowCells[colIndex], cell, table.columns[colIndex]);
+        paintCompareCell(rowCells[colIndex], cell, table.columns[colIndex], row.label);
       });
     });
 
@@ -3056,7 +3068,7 @@ const icon = document.createElement('span');
    * - an explicit "unavailable" line with a retry that refetches just this
    * column.
    */
-  function paintCompareCell(ref, cell, column) {
+  function paintCompareCell(ref, cell, column, rowLabel) {
     if (!ref) return;
 
     if (column.status !== 'ok') {
@@ -3089,20 +3101,47 @@ const icon = document.createElement('span');
       ref.td.innerHTML = '';
       const value = document.createElement('span');
       value.className = 'compare-value';
-      // API-derived text is written with textContent, never interpolated.
-      value.textContent = cell.text;
+      // API-derived text is written with textContent, never interpolated. It
+      // goes in its own node so the extreme marker beside it can be added and
+      // removed on later repaints without touching the text.
+      const text = document.createElement('span');
+      text.className = 'compare-value-text';
+      text.textContent = cell.text;
+
+      // Decorative duplicate of the pill's meaning: hidden from assistive tech,
+      // which gets the same fact once, in words, from the label below.
+      const flag = document.createElement('span');
+      flag.className = 'compare-extreme-flag';
+      flag.setAttribute('aria-hidden', 'true');
+
+      value.append(text, flag);
       ref.td.appendChild(value);
       ref.value = value;
+      ref.valueText = text;
+      ref.flag = flag;
       ref.mode = 'value';
-    } else if (ref.value.textContent !== cell.text) {
-      ref.value.textContent = cell.text;
+    } else if (ref.valueText.textContent !== cell.text) {
+      ref.valueText.textContent = cell.text;
     }
 
-    if (cell.emphasis) {
-      ref.value.setAttribute('data-emphasis', cell.emphasis);
-    } else {
+    const emphasis = cell.emphasis && COMPARE_EMPHASIS[cell.emphasis] ? cell.emphasis : null;
+    if (!emphasis) {
       ref.value.removeAttribute('data-emphasis');
+      ref.value.removeAttribute('title');
+      ref.td.removeAttribute('aria-label');
+      if (ref.flag.textContent) ref.flag.textContent = '';
+      return;
     }
+
+    const { word, glyph } = COMPARE_EMPHASIS[emphasis];
+    ref.value.setAttribute('data-emphasis', emphasis);
+    if (ref.flag.textContent !== glyph) ref.flag.textContent = glyph;
+    // Colour and arrow are both silent to a screen reader, so the cell says in
+    // words what it looks like it says. The name goes on the <td>, whose role
+    // accepts one, rather than on the inner span.
+    const name = `${cell.text}, ${word} of the compared locations`;
+    if (ref.td.getAttribute('aria-label') !== name) ref.td.setAttribute('aria-label', name);
+    ref.value.setAttribute('title', rowLabel ? `${word} for ${rowLabel}` : word);
   }
 
   /**

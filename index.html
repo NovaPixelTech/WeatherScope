@@ -308,9 +308,23 @@
           <p class="state-text" id="compare-loading-text">Comparing weather...</p>
         </div>
 
-        <!-- 3. Human-readable summary -->
+        <!-- 3. Human-readable summary. Its header also carries the key to the
+             extreme pills in the two tables below, so the colours are explained
+             before the first number is read. -->
         <section class="card compare-glance-card hidden" id="compare-glance-card" aria-labelledby="compare-glance-heading">
-          <h2 class="card-section-title" id="compare-glance-heading">Weather at a glance</h2>
+          <div class="compare-title-row">
+            <h2 class="card-section-title" id="compare-glance-heading">Weather at a glance</h2>
+            <ul class="compare-legend" role="list">
+              <li class="compare-legend-item" data-emphasis="high">
+                <span class="compare-legend-swatch" aria-hidden="true"></span>
+                <span>Highest in the row</span>
+              </li>
+              <li class="compare-legend-item" data-emphasis="low">
+                <span class="compare-legend-swatch" aria-hidden="true"></span>
+                <span>Lowest in the row</span>
+              </li>
+            </ul>
+          </div>
           <ul class="compare-insights" id="compare-insights" role="list"></ul>
         </section>
 

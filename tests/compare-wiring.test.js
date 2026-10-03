@@ -223,7 +223,9 @@ test('the render layer writes engine text with textContent, never innerHTML', ()
     assert.match(appSource, new RegExp(`const ${arg} = '<svg`), `${arg} is not a literal SVG constant`);
   });
 
-  assert.match(block, /value\.textContent = cell\.text/);
+  // The reading is written into its own node with textContent, never innerHTML.
+  assert.match(block, /text\.textContent = cell\.text/);
+  assert.match(block, /ref\.valueText\.textContent !== cell\.text/);
   assert.match(block, /ref\.errorText\.textContent !== reason/);
 });
 
@@ -251,13 +253,43 @@ test('every class the compare render layer applies is styled', () => {
   used.forEach((cls) => assert.ok(css.includes(`.${cls}`), `.${cls} is applied in app.js but never styled`));
 });
 
-test('the extreme highlight is neutral, not a good/bad colour', () => {
-  const start = css.indexOf('.compare-value[data-emphasis]');
-  assert.notEqual(start, -1, 'the extremes are never emphasised');
+test('the two extremes are visually distinct, and never colour alone', () => {
+  const base = css.indexOf('.compare-value[data-emphasis]');
+  assert.notEqual(base, -1, 'the extremes are never emphasised');
 
-  const block = css.slice(start, css.indexOf('}', start));
-  assert.match(block, /font-weight|background|border|box-shadow/);
-  assert.doesNotMatch(block, /--success|--danger|--warning|--green|--red|--orange/i);
+  const high = css.indexOf('.compare-value[data-emphasis="high"]');
+  const low = css.indexOf('.compare-value[data-emphasis="low"]');
+  assert.notEqual(high, -1, 'the high extreme has no fill of its own');
+  assert.notEqual(low, -1, 'the low extreme has no fill of its own');
+
+  const block = css.slice(base, css.indexOf('}', base));
+  assert.match(block, /background|border|box-shadow/);
+
+  const fill = (start) => (css.slice(start, css.indexOf('}', start)).match(/background:\s*([^;]+)/) || [])[1];
+  assert.ok(fill(high) && fill(low), 'an extreme fill is not a background');
+  assert.notEqual(fill(high), fill(low), 'both extremes share one fill, so they cannot be told apart');
+
+  // Both fills come from declared tokens, and the type on top of them is pure
+  // white - which is why the tokens are deeper than the bright accents.
+  const valueText = css.slice(css.indexOf('.compare-value-text {'), css.indexOf('}', css.indexOf('.compare-value-text {')));
+  assert.match(valueText, /color:\s*#ffffff/i);
+
+  [fill(high), fill(low)].forEach((value) => {
+    const name = (value.match(/var\((--[\w-]+)\)/) || [])[1];
+    assert.ok(name, `${value} is not a declared token`);
+    assert.ok(new RegExp(`${name}:\\s*#[0-9a-f]{3,8}\\s*;`, 'i').test(css), `--${name} is not defined in :root`);
+  });
+
+  // Colour is never the only cue: a glyph marks each end, and the legend in the
+  // markup spells the same two ends out in words.
+  assert.match(css, /\.compare-extreme-flag\s*\{/);
+  assert.match(html, /class="compare-legend"/);
+  assert.match(html, /data-emphasis="high"/);
+  assert.match(html, /data-emphasis="low"/);
+  assert.match(appSource, /high:\s*\{\s*word:\s*'highest',\s*glyph:\s*'[^']+'\s*\}/);
+  assert.match(appSource, /low:\s*\{\s*word:\s*'lowest',\s*glyph:\s*'[^']+'\s*\}/);
+  assert.match(appSource, /setAttribute\('aria-label', name\)/);
+  assert.match(appSource, /const name = `\$\{cell\.text\}, \$\{word\} of the compared locations`/);
 });
 
 test('both picker buttons and the table stay usable on a narrow screen', () => {

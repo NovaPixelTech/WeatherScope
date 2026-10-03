@@ -94,7 +94,7 @@ The comparison has three files of its own:
 | File | What it protects |
 | --- | --- |
 | `tests/compare.test.js` | The engine: duplicate refusal, the 2–4 limit, replace/reorder edge cases, per-column failure, missing-as-`null` readings, ties, thresholds, the statement budget, neutral wording. |
-| `tests/compare-wiring.test.js` | The glue: script order, element ids, tab semantics, section placement, escaping, `data-emphasis` staying neutral, every applied class being styled. |
+| `tests/compare-wiring.test.js` | The glue: script order, element ids, tab semantics, section placement, escaping, the two extremes being visually distinct *and* non-colour-only, every applied class being styled. |
 | `tests/compare-runtime.test.js` | The app **booted against a small hand-written DOM stub** — no jsdom, no dependencies. It switches mode, picks 3 and 4 places (and holds the 4 cap), re-picks a slot to replace it, resolves an ambiguous name, runs a comparison, fails one column, retries it, toggles °C ↔ °F and clears out, asserting nothing throws at runtime. |
 
 ---
@@ -122,7 +122,7 @@ Every column header carries that city's own local time, UTC offset from *your* c
 
 - **One failure never takes down the comparison.** Columns are fetched in parallel with `Promise.allSettled`; a timeout or network error degrades just that column to an explicit *"Weather data unavailable"* with a **Try again** button that refetches only itself.
 - **Missing is not zero.** A reading that is absent renders as `--` and is excluded from both the extremes and the sentences, so a difference is never invented between two equals.
-- **Nothing is styled as better or worse.** Extremes get one neutral accent bar, because neither end of a temperature range is preferable.
+- **The extremes are unmistakable, and still never "good" or "bad".** The highest and lowest reading of a row become filled pills — white on deep green ▲ for the high end, white on deep red ▼ for the low end (both past WCAG AAA against white text), explained once by the legend in the glance card. Colour is never the only cue: the ▲/▼ glyph, the legend wording and the cell's accessible name all repeat it, and the sentences below still talk only about "highest" and "lowest", because neither end of a temperature range is preferable.
 - **No unit logic of its own.** `compare.js` receives the app's existing formatters, so the °C ↔ °F toggle repaints the comparison instantly with no refetch, and `WMO_MAP` stays the single source of weather wording.
 - **Independence of columns.** A location you are already viewing on the dashboard reuses that payload verbatim instead of issuing a second request for data the page already holds.
 - **The comparison cannot swallow the dashboard.** The default city starts loading on page load; if it arrives after you have switched to Compare, the dashboard and its full-screen error stay hidden rather than covering the surface you are on.
