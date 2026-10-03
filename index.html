@@ -209,6 +209,27 @@
         </button>
       </div>
 
+      <!-- Shared Forecast Banner. A shared link names the city and the cards the
+           sender was looking at, so the page says so out loud on arrival instead
+           of leaving the recipient to guess why one card is ringed. Hidden until
+           a shared link is actually opened. -->
+      <div id="shared-banner" class="shared-banner" role="status" aria-live="polite" hidden>
+        <span class="shared-banner-icon" aria-hidden="true">🔗</span>
+        <p class="shared-banner-text">
+          <span class="shared-banner-label">Shared forecast</span>
+          <span class="shared-banner-city" id="shared-banner-city"></span>
+          <span class="shared-banner-cards" id="shared-banner-cards"></span>
+        </p>
+        <button type="button" class="btn btn-secondary shared-clear-btn" id="shared-clear-btn">
+          Show all cards
+        </button>
+      </div>
+
+      <!-- Spoken-only channel for share confirmations (link copied, cards
+           revealed). A class change on the icon button is invisible to a screen
+           reader, so the outcome is announced here too. -->
+      <p class="sr-only" id="share-status" role="status" aria-live="polite"></p>
+
       <!-- Climate Condition Search Results View -->
       <section id="climate-results-section" class="card climate-results-card hidden">
         <div class="climate-results-header">
@@ -497,8 +518,9 @@
           </div>
         </section>
 
-        <!-- Condition Metrics Grid -->
-        <section class="card metrics-card" aria-label="Key Weather Metrics">
+        <!-- Condition Metrics Grid. The id is what a shared deep link points at
+             when the sender was looking at this card, so it must stay stable. -->
+        <section class="card metrics-card" id="metrics-card" aria-label="Key Weather Metrics">
           <h2 class="card-section-title">Current Conditions</h2>
           <div class="metrics-grid">
             <!-- Humidity -->
@@ -656,7 +678,7 @@
         </section>
 
         <!-- Hourly Forecast Strip -->
-        <section class="card hourly-card">
+        <section class="card hourly-card" id="hourly-card">
           <div class="card-header-row">
             <h2 class="card-section-title">24-Hour Forecast</h2>
             <span class="card-subtitle">Local hourly projection &middot; <span class="tz-label" id="hourly-tz-label">city time</span></span>
@@ -667,7 +689,7 @@
         </section>
 
         <!-- 7-Day Extended Forecast -->
-        <section class="card daily-card">
+        <section class="card daily-card" id="daily-card">
           <div class="card-header-row">
             <h2 class="card-section-title">7-Day Forecast</h2>
             <span class="card-subtitle">Upcoming outlook &middot; <span class="tz-label" id="daily-tz-label">city time</span></span>
@@ -722,6 +744,8 @@
   <script src="compare.js"></script>
   <!-- Pure "Today at a glance" logic (metrics + verdict), no DOM access -->
   <script src="glance.js"></script>
+  <!-- Pure share-link logic (city + cards deep links), no DOM access -->
+  <script src="share.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

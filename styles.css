@@ -225,6 +225,103 @@ body {
 }
 
 /* ==========================================================================
+   Shared Forecast Links
+   --------------------------------------------------------------------------
+   A ring on the cards that arrived in the link, and a banner that names the
+   city and those cards. The ring is deliberately not a filter: every other card
+   stays readable, so the recipient sees what was shared first and can keep
+   exploring. The colour alone never carries the meaning - the banner says it in
+   words, and the announcement is repeated in a live region.
+   ========================================================================== */
+
+/* Spoken-only: the share outcome and the arrival are announced here, so the
+   visual confirmation on the button is never the only channel. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.card.is-shared {
+  border-color: var(--accent-cyan);
+  box-shadow:
+    0 0 0 3px rgba(56, 189, 248, 0.35),
+    0 12px 32px -4px rgba(0, 0, 0, 0.65);
+}
+
+.shared-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: rgba(2, 132, 199, 0.16);
+  border: 1px solid var(--accent-cyan);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  margin: 0 0 14px;
+  box-shadow: 0 10px 26px -8px rgba(0, 0, 0, 0.6);
+}
+
+/* The banner is laid out with flex, which would otherwise defeat the hidden
+   attribute it ships with. */
+.shared-banner[hidden] {
+  display: none;
+}
+
+.shared-banner-icon {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.shared-banner-text {
+  margin: 0;
+  flex: 1 1 260px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.shared-banner-label {
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.72rem;
+  color: var(--accent-cyan);
+}
+
+.shared-banner-city {
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.shared-banner-cards {
+  color: var(--text-muted);
+}
+
+.shared-clear-btn {
+  margin-top: 0;
+  height: 40px;
+  padding: 0 16px;
+  font-size: 0.82rem;
+}
+
+/* Copy confirmation on the share button itself. */
+.share-btn.is-confirmed {
+  background: rgba(52, 211, 153, 0.28);
+  border-color: var(--accent-emerald);
+  color: var(--accent-emerald);
+}
+
+/* ==========================================================================
    Header & Search Component
    ========================================================================== */
 .app-header {

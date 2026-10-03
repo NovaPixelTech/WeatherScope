@@ -180,6 +180,49 @@ Every column header carries that city's own local time, UTC offset from *your* c
 
 ---
 
+## 🔗 Shared forecast links
+
+The share button next to the city name no longer hands out the app's address. The link it sends **is** the forecast: whoever opens it lands on that city, with that city's cards on screen.
+
+```text
+index.html?city=Tokyo&region=Tokyo&country=Japan&lat=35.6762&lon=139.6503
+            &tz=Asia%2FTokyo&cards=glance,hourly&unit=f&window=evening
+```
+
+| Parameter | What it restores |
+| --- | --- |
+| `city`, `region`, `country` | The city, spelled out the way the dashboard spells it |
+| `lat`, `lon` | The exact point, so the right *Paris* opens without re-geocoding |
+| `tz` | The city's own timezone, so the live clocks are right too |
+| `cards` | Which cards to ring: `glance`, `hero`, `assistant`, `metrics`, `hourly`, `daily` |
+| `unit` | `c` or `f`, so the numbers match the message that came with the link |
+| `window` | The assistant's selected rain window (morning / midday / afternoon / evening) |
+
+### What the recipient sees
+
+- **The shared city, not their last city.** A shared link is resolved before the saved city and before the default one — opening it always shows what was shared.
+- **The shared cards, ringed and scrolled into view.** The first shared card is scrolled to, each shared card carries a cyan ring, and a banner names the city and the cards in words (*"Shared forecast — Tokyo, Japan · Today at a glance, 24-hour forecast"*). Everything else stays readable, so they can keep exploring; **Show all cards** drops the ring.
+- **The same numbers as the message.** The unit and the rain window travel in the link, and the arrival is announced in a live region, so the outcome is never colour-only or silent.
+
+### Design decisions
+
+- **What you see is what you share.** `cards` is measured from the viewport: someone who scrolled down to the hourly strip shares the hourly strip, not six cards they never looked at. If the page cannot be measured at all, the whole dashboard is shared rather than an empty card list.
+- **The coordinates are the identity.** Every share link carries `lat`/`lon`, so no re-geocoding happens and a city name can never resolve to a different place.
+- **Readable, not encoded.** Plain query parameters instead of a base64 blob: the link survives being pasted through a chat app that mangles it, and a human can see which city it opens.
+- **Nothing off the wire is trusted.** `share.js` validates every field on the way in — unknown card keys, a lone coordinate, a latitude past the pole, a nonsense unit and a control character in a city name are all dropped, and a URL that does not name a city is not treated as a share link at all.
+- **The ring cannot outlive its claim.** Picking a different city clears the ring and the banner immediately, and the ring is only applied once the shared city's data has actually arrived — a superseded or failed load leaves nothing behind.
+- **A share is confirmed, never silent.** With a native share sheet the link goes as its own field; without one, the link *and* the message are copied (with a clipboard fallback), and the button confirms visually while a live region says it out loud. If even that fails, the deep link is placed in the address bar so it can still be copied by hand.
+
+### Running the tests
+
+`tests/share.test.js` covers the link format (round-trip, re-sharing, card vocabulary, hostile input) and the wiring (script order, card ids and bindings, deep-link-on-share, arrival-before-saved-city, stale-ring clearing, styling and the live region):
+
+```powershell
+node --test
+```
+
+---
+
 ## 🕐 Live local time & time-zone difference
 
 Every surface that shows a city's climate information also shows that city's **live local clock**, ticking in real time down to the second, plus **how far that city is from the time zone you are in**.
@@ -322,6 +365,7 @@ Test_001/
 ├── glance.js         # "Today at a glance" engine (pure: current conditions, today's rain peak, verdict)
 ├── advice.js         # Personal Weather Assistant engine (pure, unit-agnostic, no DOM access)
 ├── compare.js        # Compare Locations engine (pure: selection, metrics, thresholds, insights)
+├── share.js          # Shared forecast links engine (pure: city + card deep links, validation)
 ├── tests/
 │   ├── advice.test.js         # Recommendation logic: thresholds, units, scope, missing data, determinism
 │   ├── wiring.test.js         # Dashboard glue: global, script order, element bindings, escaping, styling
@@ -329,7 +373,8 @@ Test_001/
 │   ├── glance-wiring.test.js  # Glance glue: script order, element ids, card placement, escaping, styling, a11y
 │   ├── compare.test.js        # Comparison engine: selection limits, per-column failure, thresholds, wording
 │   ├── compare-wiring.test.js # Comparison glue: script order, element ids, tab semantics, escaping, styling
-│   └── compare-runtime.test.js# App booted against a DOM stub: modes, fetch, retry, units, clearing
+│   ├── compare-runtime.test.js# App booted against a DOM stub: modes, fetch, retry, units, clearing
+│   └── share.test.js          # Share links: deep-link format, card vocabulary, hostile params, arrival wiring
 ├── start-server.ps1  # Lightweight zero-dependency PowerShell static web server
 └── README.md         # Documentation and project overview
 ```

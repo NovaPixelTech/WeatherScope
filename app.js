@@ -149,6 +149,10 @@
     compareReplaceIndex: null,
     compareSeq: 0,
     compareController: null,
+    // The shared forecast this page was opened from, or null on an ordinary
+    // visit. It is kept only while it still describes what is on screen: picking
+    // another city drops it (see `loadCityWeather`).
+    sharedPayload: null,
   };
 
   const THEME_CLASSES = [
@@ -639,6 +643,23 @@
     glanceWearHeadline: document.getElementById('glance-wear-headline'),
     glanceWearDetail: document.getElementById('glance-wear-detail'),
 
+    // The shareable cards. A shared link names these keys, and each key maps to
+    // exactly one section id, so the recipient lands on the card the sender was
+    // looking at rather than on a generic page. ("glance" is bound above, with
+    // the rest of the glance card.)
+    heroCard: document.getElementById('hero-card'),
+    assistantCard: document.getElementById('assistant-card'),
+    metricsCard: document.getElementById('metrics-card'),
+    hourlyCard: document.getElementById('hourly-card'),
+    dailyCard: document.getElementById('daily-card'),
+
+    // Shared-link arrival
+    sharedBanner: document.getElementById('shared-banner'),
+    sharedBannerCity: document.getElementById('shared-banner-city'),
+    sharedBannerCards: document.getElementById('shared-banner-cards'),
+    sharedClearBtn: document.getElementById('shared-clear-btn'),
+    shareStatus: document.getElementById('share-status'),
+
     cityName: document.getElementById('city-name'),
     locationMeta: document.getElementById('location-meta'),
     localTime: document.getElementById('local-time'),
@@ -730,6 +751,10 @@
   // registered once per city load instead of being re-registered on every tick.
   let heroClockId = null;
   let userClockId = null;
+
+  // Holds the "link copied" state on the share button for a couple of seconds,
+  // so repeated shares cannot stack timers on the same node.
+  let shareConfirmTimer = null;
 
   // ==========================================================================
   // WMO Weather Codes Mapping
@@ -1684,43 +1709,73 @@
   }
 
   /**
-   * The three metrics are built from the engine's list rather than hard-coded
-   * in the markup, so a metric can never be added in one place and forgotten in
-   * the other. Each row is label + value (+ dimmed note) with a spoken-only
-   * hint, so "Rain 65%" is read as "Rain 65% peak chance today".
+   * The message body that travels with the link. It names the city (not just
+   * the country), the sky, and today's range in the *sender's* unit - and the
+   * link itself carries that same unit, so the recipient sees the same numbers
+   * the message promised.
    */
-  
   function generateShareText(data, city) {
     if (!data || !city) return '';
     const current = data.current;
     const daily = data.daily;
-    const cityName = city.name;
     const temp = formatTemp(current.temperature_2m);
     const unit = getTempUnitSymbol();
     const rain = current.precipitation_probability ?? (data.hourly && data.hourly.precipitation_probability && data.hourly.precipitation_probability[0]) ?? 0;
     const maxTemp = daily && daily.temperature_2m_max && daily.temperature_2m_max.length > 0 ? formatTemp(daily.temperature_2m_max[0]) : temp;
     const minTemp = daily && daily.temperature_2m_min && daily.temperature_2m_min.length > 0 ? formatTemp(daily.temperature_2m_min[0]) : temp;
     const rainChance = Math.round(rain);
-    return "Weather in " + cityName + "\n" + temp + unit + "\n" + rainChance + "% rain\nHigh " + maxTemp + unit + "\nLow " + minTemp + unit;
+    const condition = WMO_MAP[current.weather_code] || { label: 'Clear' };
+    const place = shareEngine() ? shareEngine().describePlace({ city: city.name, admin1: city.admin1, country: city.country }) : city.name;
+    return "Weather in " + place + "\n" + temp + unit + " · " + condition.label + "\n" + rainChance + "% rain\nHigh " + maxTemp + unit + "\nLow " + minTemp + unit;
   }
 
+  /**
+   * Hands over a link that *is* this city's forecast rather than the app's
+   * address bar: the deep link built by `share.js` carries the city, the cards
+   * that were on screen and the unit, so opening it re-opens that city with
+   * those cards ringed and scrolled into view (see `applySharedLink`).
+   *
+   * Native share sheets take the link as its own field, so the recipient gets a
+   * tap-through to the forecast itself. Without one, the link is copied
+   * alongside the message - copying the message alone would be the old, useless
+   * behaviour.
+   */
   function shareWeather() {
     if (!state.weatherData || !state.currentCity) return;
-    const text = generateShareText(state.weatherData, state.currentCity);
-    const shareData = {
-      title: "Weather in " + state.currentCity.name,
-      text: text,
-      url: window.location.href
-    };
+
+    const share = shareEngine();
+    const city = state.currentCity;
+    const url = share ? share.buildShareUrl(window.location.href, currentSharePayload()) : '';
+    if (!url) return;
+
+    const text = generateShareText(state.weatherData, city);
+    const place = share ? share.describePlace({ city: city.name, admin1: city.admin1, country: city.country }) : city.name;
+
     if (navigator.share) {
-      navigator.share(shareData).catch(function(){})
-    } else {
-      try {
-        navigator.clipboard.writeText(text).catch(function(){})
-      } catch (e) {}
+      navigator.share({ title: "Weather in " + place, text: text, url: url }).catch(function () {});
+      return;
     }
+
+    copyShareText(text + '\n' + url).then(function (copied) {
+      if (copied) {
+        announceShare('Link copied. Opening it shows ' + place + ' with the shared cards.');
+        return;
+      }
+      // Nothing was copied, so the link is put where the visitor can still
+      // reach it by hand - and they are told, rather than left guessing.
+      const shown = showShareUrlInAddressBar(url);
+      announceShare(shown
+        ? 'Could not copy automatically. The link for ' + place + ' is now in the address bar.'
+        : 'Could not copy automatically. Copy the link from the address bar to share this forecast.');
+    });
   }
 
+  /**
+   * The three metrics are built from the engine's list rather than hard-coded
+   * in the markup, so a metric can never be added in one place and forgotten in
+   * the other. Each row is label + value (+ dimmed note) with a spoken-only
+   * hint, so "Rain 65%" is read as "Rain 65% peak chance today".
+   */
   function renderGlanceMetrics(metrics) {
     const container = elements.glanceMetrics;
     if (!container) return;
@@ -2210,6 +2265,267 @@
         </div>
       `;
       elements.dailyList.appendChild(row);
+    });
+  }
+
+// ==========================================================================
+  // Shared Forecast Links
+  // --------------------------------------------------------------------------
+  // A share link is a deep link: the city, the cards that were on screen and the
+  // unit travel in the query string, so the recipient opens *this* forecast and
+  // not the app's front page. `share.js` owns the format (it is pure and unit
+  // tested on its own); everything here is the browser half:
+  //
+  //   share   -> measure the visible cards, build the link, hand it over
+  //   arrival -> parse the link, load that city, ring those cards, scroll to them
+  //
+  // The ring is deliberately not a filter: the other cards stay readable, so the
+  // recipient can see what was shared first and keep exploring afterwards.
+  // ==========================================================================
+  function shareEngine() {
+    return window.SkyCastShare || null;
+  }
+
+  /** Card key -> its section element. One key, one element, both directions. */
+  function shareCardNode(key) {
+    const map = {
+      glance: elements.glanceCard,
+      hero: elements.heroCard,
+      assistant: elements.assistantCard,
+      metrics: elements.metricsCard,
+      hourly: elements.hourlyCard,
+      daily: elements.dailyCard,
+    };
+    return map[key] || null;
+  }
+
+  /**
+   * Which cards is the sender actually looking at? Sharing what is on screen is
+   * the honest reading of "share this forecast": someone who scrolled down to
+   * the hourly strip shares the hourly strip, not six cards they never saw.
+   *
+   * Falls back to the whole dashboard whenever the page cannot be measured
+   * (the dashboard is hidden, or there is no layout engine yet), so the link
+   * never ends up pointing at nothing.
+   */
+  function visibleShareCards() {
+    const share = shareEngine();
+    const allCards = share ? share.CARD_KEYS.slice() : ['glance'];
+    const viewportHeight = window.innerHeight || 0;
+    const visible = [];
+    let measured = 0;
+
+    allCards.forEach((key) => {
+      const node = shareCardNode(key);
+      if (!node || node.hidden) return;
+      if (typeof node.getBoundingClientRect !== 'function') return;
+
+      const rect = node.getBoundingClientRect();
+      if (!rect || (rect.height === 0 && rect.width === 0)) return;
+      measured++;
+      if (rect.bottom > 0 && rect.top < viewportHeight) visible.push(key);
+    });
+
+    if (measured === 0) return allCards;
+    // Scrolled past the dashboard entirely: share the card the page opens on.
+    return visible.length ? visible : [allCards[0]];
+  }
+
+  /** The current city and view, as one deep-link payload. */
+  function currentSharePayload() {
+    const city = state.currentCity || {};
+    const data = state.weatherData || {};
+    return {
+      city: city.name,
+      region: city.admin1,
+      country: city.country,
+      latitude: city.latitude,
+      longitude: city.longitude,
+      timezone: data.timezone || city.timezone || '',
+      cards: visibleShareCards(),
+      unit: state.unit === 'fahrenheit' ? 'f' : 'c',
+      windowKey: state.adviceWindowKey,
+    };
+  }
+
+  /**
+   * Clipboard write with a fallback for browsers (and insecure origins) where
+   * the async Clipboard API is unavailable. Resolves to whether the text made
+   * it, because the caller tells the visitor either way.
+   */
+  function copyShareText(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      return navigator.clipboard.writeText(text).then(
+        function () { return true; },
+        function () { return legacyCopy(text); }
+      );
+    }
+    return Promise.resolve(legacyCopy(text));
+  }
+
+  function legacyCopy(text) {
+    let area = null;
+    try {
+      area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.top = '0';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      const copied = document.execCommand('copy');
+      document.body.removeChild(area);
+      return !!copied;
+    } catch (e) {
+      if (area && area.parentNode) area.parentNode.removeChild(area);
+      return false;
+    }
+  }
+
+  /**
+   * Confirms a share in the one place every visitor can perceive: a live region
+   * for screen readers and a visible state on the icon button for everyone else.
+   */
+  function announceShare(message) {
+    if (elements.shareStatus) elements.shareStatus.textContent = message;
+
+    const btn = elements.shareBtn;
+    if (!btn) return;
+
+    btn.classList.add('is-confirmed');
+    window.clearTimeout(shareConfirmTimer);
+    shareConfirmTimer = window.setTimeout(function () {
+      btn.classList.remove('is-confirmed');
+    }, 2000);
+  }
+
+  /**
+   * Last resort when the clipboard is unavailable: put the deep link in the
+   * address bar so it can still be copied by hand. Reported back to the caller
+   * because `replaceState` is refused on some `file://` pages.
+   */
+  function showShareUrlInAddressBar(url) {
+    try {
+      window.history.replaceState(null, '', url);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** Does a payload still describe the city that is on screen? */
+  function isSameSharedCity(payload, city) {
+    if (!payload || !city) return false;
+    const lat = Number(city.latitude);
+    const lon = Number(city.longitude);
+    if (payload.latitude !== null && Number.isFinite(lat) && Number.isFinite(lon)) {
+      return Math.abs(lat - payload.latitude) < 0.01 && Math.abs(lon - payload.longitude) < 0.01;
+    }
+    return String(payload.city).toLowerCase() === String(city.name || '').toLowerCase();
+  }
+
+  /**
+   * Drops the shared view. Called when the recipient decides the shared cards
+   * are not the point - either by picking another city or by pressing "Show all
+   * cards" - so a ring and a banner can never outlive what they describe.
+   */
+  function clearSharedView() {
+    if (!state.sharedPayload) return;
+    state.sharedPayload = null;
+
+    shareEngineKeys().forEach(function (key) {
+      const node = shareCardNode(key);
+      if (node) node.classList.remove('is-shared');
+    });
+
+    if (elements.sharedBanner) elements.sharedBanner.hidden = true;
+  }
+
+  function shareEngineKeys() {
+    const share = shareEngine();
+    return share ? share.CARD_KEYS.slice() : ['glance'];
+  }
+
+  /** Rings the shared cards, scrolls the first one into view, fills the banner. */
+  function revealSharedCards(payload) {
+    const share = shareEngine();
+    const cards = share ? share.sanitizeCards(payload.cards) : ['glance'];
+
+    cards.forEach(function (key) {
+      const node = shareCardNode(key);
+      if (node) node.classList.add('is-shared');
+    });
+
+    if (elements.sharedBannerCity) {
+      elements.sharedBannerCity.textContent = share
+        ? share.describePlace(payload)
+        : payload.city;
+    }
+    if (elements.sharedBannerCards) {
+      elements.sharedBannerCards.textContent = share
+        ? share.describeCards(cards)
+        : '';
+    }
+    if (elements.sharedBanner) elements.sharedBanner.hidden = false;
+
+    const first = shareCardNode(cards[0]);
+    if (first && typeof first.scrollIntoView === 'function') {
+      // 'auto' under reduced motion: the ring and the banner already say what
+      // arrived, so the scroll does not need to be an animation.
+      const reduceMotion = window.matchMedia
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      first.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    }
+
+    announceShare('Shared forecast for ' + (share ? share.describePlace(payload) : payload.city) +
+      '. Showing ' + (share ? share.describeCards(cards) : '') + '.');
+  }
+
+  /**
+   * Opening a shared link. Unit first, because every number in the message that
+   * came with the link is in the sender's unit; then the city; and only once the
+   * cards exist do they get ringed.
+   *
+   * The saved city and the default city are deliberately *not* consulted first:
+   * the whole point of the link is that it decides which city is on screen.
+   */
+  function applySharedLink(payload) {
+    const share = shareEngine();
+    if (!share || !payload) return false;
+
+    // Driven through the same buttons the visitor uses, so there is still only
+    // one code path that can change the unit.
+    if (payload.unit === 'f' && elements.unitF) elements.unitF.click();
+    if (payload.unit === 'c' && elements.unitC) elements.unitC.click();
+
+    const windows = window.SkyCastAdvice && window.SkyCastAdvice.RAIN_WINDOWS;
+    const knownWindow = windows && windows.some(function (w) { return w.key === payload.windowKey; });
+    if (knownWindow) state.adviceWindowKey = payload.windowKey;
+
+    const city = {
+      name: payload.city,
+      admin1: payload.region || '',
+      country: payload.country || '',
+      latitude: payload.latitude,
+      longitude: payload.longitude,
+      timezone: payload.timezone || 'auto',
+    };
+
+    state.sharedPayload = payload;
+
+    // Coordinates travel with the link, so the shared city is the shared city -
+    // no re-geocoding, and no risk of the name matching somewhere else. A
+    // hand-edited link without coordinates falls back to the search box.
+    const hasCoords = payload.latitude !== null && payload.longitude !== null;
+    const pending = hasCoords ? loadCityWeather(city) : handleCitySearch(payload.city);
+
+    return Promise.resolve(pending).then(function () {
+      // The load can be superseded, or can fail; either way the ring must only
+      // land on the forecast the link asked for.
+      if (state.sharedPayload !== payload || !state.currentCity) return false;
+      revealSharedCards(payload);
+      return true;
     });
   }
 
@@ -3451,6 +3767,11 @@ const icon = document.createElement('span');
   async function loadCityWeather(city) {
     if (!city || city.latitude === undefined || city.latitude === null || city.longitude === undefined || city.longitude === null) return;
 
+    // A shared link is a claim about one specific city. Once the visitor moves
+    // to another one the claim is stale, so the ring and the banner are dropped
+    // here rather than left pointing at a forecast that is no longer on screen.
+    if (state.sharedPayload && !isSameSharedCity(state.sharedPayload, city)) clearSharedView();
+
     // Supersede any in-flight city request so a slow earlier response
     // cannot overwrite the city the user actually selected (#5)
     if (state.weatherController) state.weatherController.abort();
@@ -3556,7 +3877,10 @@ const icon = document.createElement('span');
         return;
       }
 
-      loadCityWeather(cities[0]);
+      // Awaited, not fired: a shared link resolves once this city's cards are on
+      // screen (see `applySharedLink`), so the caller has to be able to wait for
+      // exactly that.
+      await loadCityWeather(cities[0]);
     } catch (err) {
       if (err.name === 'AbortError') return;
       console.error('Search error:', err);
@@ -4202,6 +4526,15 @@ const icon = document.createElement('span');
       });
     }
 
+    // "Show all cards" on a shared forecast: the recipient keeps the city, drops
+    // the ring and the banner.
+    if (elements.sharedClearBtn) {
+      elements.sharedClearBtn.addEventListener('click', function () {
+        clearSharedView();
+        if (elements.dashboard) elements.dashboard.scrollIntoView({ block: 'start' });
+      });
+    }
+
     // "Rain during your ...?" window selector (delegated: the tabs are
     // re-created on every render, so the listener lives on the container)
     if (elements.assistantWindowTabs) {
@@ -4341,6 +4674,15 @@ const icon = document.createElement('span');
     }
     elements.unitC.setAttribute('aria-checked', state.unit === 'celsius' ? 'true' : 'false');
     elements.unitF.setAttribute('aria-checked', state.unit === 'fahrenheit' ? 'true' : 'false');
+
+    // A shared link decides the city. It is checked before the saved city and
+    // before the default one, so opening a link always shows the forecast that
+    // was shared instead of whatever this browser last looked at.
+    const sharedPayload = shareEngine() ? shareEngine().parseShareLink(window.location.href) : null;
+    if (sharedPayload) {
+      applySharedLink(sharedPayload);
+      return;
+    }
 
     // Note: the 72-city global batch is no longer prefetched on every page load.
     // It is fetched lazily the first time climate mode is used (#9).
