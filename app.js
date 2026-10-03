@@ -619,6 +619,22 @@
 
     // Full Weather Dashboard
     dashboard: document.getElementById('weather-dashboard'),
+
+    // Today at a Glance
+    glanceCard: document.getElementById('glance-card'),
+    glanceLocation: document.getElementById('glance-location'),
+    glanceLocationMeta: document.getElementById('glance-location-meta'),
+    glanceTemp: document.getElementById('glance-temp'),
+    glanceTempSymbol: document.getElementById('glance-temp-symbol'),
+    glanceFeelsLike: document.getElementById('glance-feels-like'),
+    glanceCondition: document.getElementById('glance-condition'),
+    glanceWeatherIcon: document.getElementById('glance-weather-icon'),
+    glanceMetrics: document.getElementById('glance-metrics'),
+    glanceVerdict: document.getElementById('glance-verdict'),
+    glanceVerdictIcon: document.getElementById('glance-verdict-icon'),
+    glanceVerdictHeadline: document.getElementById('glance-verdict-headline'),
+    glanceVerdictDetail: document.getElementById('glance-verdict-detail'),
+
     cityName: document.getElementById('city-name'),
     locationMeta: document.getElementById('location-meta'),
     localTime: document.getElementById('local-time'),
@@ -1545,6 +1561,130 @@
     document.body.classList.add(themeClass);
   }
 
+  // ==========================================================================
+  // Today at a Glance
+  // --------------------------------------------------------------------------
+  // The first card on the page, and the only one most visitors read. The engine
+  // (`glance.js`) is pure and unit-agnostic, so this layer only hands it the
+  // payload the dashboard already has plus the app's own unit formatters, then
+  // paints what comes back. Every engine string is written with `textContent`,
+  // because the city name originates in Open-Meteo's geocoder.
+  // ==========================================================================
+  function glanceFormat() {
+    return {
+      temp: formatTemp,
+      tempSymbol: getTempUnitSymbol(),
+      wind: formatWindSpeed,
+      windSymbol: getWindUnitSymbol(),
+      precip: formatPrecip,
+      precipSymbol: getPrecipUnitSymbol(),
+      percent: (value) => `${Math.round(value)}%`,
+      cardinal: getWindCardinal,
+      conditionLabel: (code) => (WMO_MAP[code] || { label: 'Clear' }).label,
+    };
+  }
+
+  function renderGlance(data) {
+    const card = elements.glanceCard;
+    if (!card || !window.SkyCastGlance) return;
+
+    let glance = null;
+    try {
+      glance = window.SkyCastGlance.build({
+        current: data.current,
+        hourly: data.hourly,
+        daily: data.daily,
+        currentTime: data.current ? data.current.time : null,
+        city: state.currentCity,
+        format: glanceFormat(),
+      });
+    } catch (err) {
+      // The engine is defensive by design, but a bug here must never take the
+      // forecast down with it: the card simply stays hidden.
+      console.warn('SkyCast: the glance summary could not be built', err);
+      return;
+    }
+
+    // Nothing usable in the payload - hide the card rather than show a
+    // confident-sounding blank.
+    if (!glance || !glance.ok) {
+      card.hidden = true;
+      return;
+    }
+
+    card.hidden = false;
+
+    // --- Where ---------------------------------------------------------------
+    elements.glanceLocation.textContent = glance.location.name;
+    elements.glanceLocationMeta.textContent = glance.location.meta;
+
+    // --- Temperature & sky ----------------------------------------------------
+    elements.glanceTemp.textContent = glance.temperature;
+    elements.glanceTempSymbol.textContent = glance.tempSymbol;
+    elements.glanceFeelsLike.textContent = glance.feelsLike;
+    elements.glanceCondition.textContent = glance.condition;
+
+    // Same generated icon set as the hero: a fixed SVG per WMO code, with no
+    // API text interpolated into it.
+    const condition = WMO_MAP[data.current.weather_code] || { icon: 'clear' };
+    elements.glanceWeatherIcon.innerHTML = getWeatherSvg(condition.icon, data.current.is_day);
+
+    // --- Rain / wind / humidity -----------------------------------------------
+    renderGlanceMetrics(glance.metrics);
+
+    // --- The verdict ----------------------------------------------------------
+    const verdict = glance.verdict;
+    elements.glanceVerdict.dataset.tone = verdict.tone || 'unknown';
+    elements.glanceVerdictIcon.textContent = verdict.icon || '';
+    elements.glanceVerdictHeadline.textContent = verdict.text;
+    elements.glanceVerdictDetail.textContent = verdict.detail || '';
+  }
+
+  /**
+   * The three metrics are built from the engine's list rather than hard-coded
+   * in the markup, so a metric can never be added in one place and forgotten in
+   * the other. Each row is label + value (+ dimmed note) with a spoken-only
+   * hint, so "Rain 65%" is read as "Rain 65% peak chance today".
+   */
+  function renderGlanceMetrics(metrics) {
+    const container = elements.glanceMetrics;
+    if (!container) return;
+
+    container.innerHTML = '';
+    metrics.forEach((metric) => {
+      const item = document.createElement('div');
+      item.className = 'glance-metric';
+      item.dataset.metric = metric.key;
+      item.setAttribute('role', 'listitem');
+
+      const label = document.createElement('span');
+      label.className = 'glance-metric-label';
+      label.textContent = metric.label;
+
+      const value = document.createElement('span');
+      value.className = 'glance-metric-value';
+      value.textContent = metric.value;
+
+      item.append(label, value);
+
+      if (metric.note) {
+        const note = document.createElement('span');
+        note.className = 'glance-metric-note';
+        note.textContent = metric.note;
+        item.appendChild(note);
+      }
+
+      if (metric.hint) {
+        const hint = document.createElement('span');
+        hint.className = 'glance-metric-hint';
+        hint.textContent = metric.hint;
+        item.appendChild(hint);
+      }
+
+      container.appendChild(item);
+    });
+  }
+
   function renderWeather() {
     if (!state.weatherData || !state.currentCity) return;
 
@@ -1556,6 +1696,10 @@
 
     // Apply Dynamic Theme
     applyTheme(current.weather_code, current.is_day);
+
+    // The "Today at a glance" summary is rendered first: it is the first card
+    // in the DOM, so it paints before anything else and reads in the same order.
+    renderGlance(data);
 
     // City and Meta
     elements.cityName.textContent = city.name;

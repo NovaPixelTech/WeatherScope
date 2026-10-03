@@ -356,6 +356,51 @@
 
       <!-- Full Weather Dashboard (Populated dynamically) -->
       <div id="weather-dashboard" class="dashboard-grid">
+        <!-- Today at a glance. The first thing on the page and the only thing
+             most visitors read: where they are, how warm it is, what the sky is
+             doing, the three numbers that matter, and one plain-language
+             verdict. The verdict is deliberately not colour-only - the icon and
+             the sentence carry it too. Hidden until a city has loaded, so a
+             refresh never flashes yesterday's answer. -->
+        <section class="card glance-card" id="glance-card" aria-labelledby="glance-heading" hidden>
+          <div class="glance-head">
+            <h2 class="card-section-title" id="glance-heading">Today at a glance</h2>
+            <p class="glance-location">
+              <span class="glance-pin" aria-hidden="true">📍</span>
+              <span class="glance-location-name" id="glance-location">--</span>
+              <span class="glance-location-meta" id="glance-location-meta"></span>
+            </p>
+          </div>
+
+          <div class="glance-body">
+            <div class="glance-temp">
+              <p class="glance-temp-main">
+                <span class="glance-temp-value" id="glance-temp">--</span><span class="glance-temp-symbol" id="glance-temp-symbol">°C</span>
+              </p>
+              <p class="glance-feels-like">Feels like <span id="glance-feels-like">--</span></p>
+            </div>
+
+            <div class="glance-condition">
+              <!-- Same icon set as the hero, drawn by app.js from WMO_MAP -->
+              <span class="glance-weather-icon" id="glance-weather-icon" aria-hidden="true"></span>
+              <span class="glance-condition-text" id="glance-condition">--</span>
+            </div>
+
+            <!-- Rain chance, wind and humidity, injected by app.js so a metric
+                 can never be added in one place and forgotten in another -->
+            <div class="glance-metrics" id="glance-metrics" role="list"></div>
+          </div>
+
+          <div class="glance-verdict" id="glance-verdict" data-tone="unknown" role="status" aria-live="polite">
+            <span class="glance-verdict-icon" id="glance-verdict-icon" aria-hidden="true"></span>
+            <p class="glance-verdict-text">
+              <span class="glance-verdict-label" id="glance-verdict-label">Today&rsquo;s verdict:</span>
+              <strong class="glance-verdict-headline" id="glance-verdict-headline">--</strong>
+              <span class="glance-verdict-detail" id="glance-verdict-detail"></span>
+            </p>
+          </div>
+        </section>
+
         <!-- Hero Weather Card -->
         <section class="card hero-card" id="hero-card">
           <div class="hero-header">
@@ -648,6 +693,8 @@
   <script src="advice.js"></script>
   <!-- Pure comparison logic (location list, metrics, insights), no DOM access -->
   <script src="compare.js"></script>
+  <!-- Pure "Today at a glance" logic (metrics + verdict), no DOM access -->
+  <script src="glance.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

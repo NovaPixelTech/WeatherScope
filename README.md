@@ -44,6 +44,7 @@ Powered by the [Open-Meteo API](https://open-meteo.com/), SkyCast operates with 
   - Real-time rainfall accumulation and cloud cover %.
   - Local sunrise and sunset times.
   - **Local Time** card: the city's live clock, its UTC offset, how far it sits from *your* clock, and your own time for direct comparison.
+- **Today at a Glance**: the first card on the dashboard — city, temperature, feels-like, condition, today's rain chance, wind and humidity in three tiles, closed by a one-word verdict — see [Today at a glance](#-today-at-a-glance).
 - **Personal Weather Assistant**: one headline sentence plus six recommendation tiles — see [Weather Assistant](#-personal-weather-assistant).
 - **24-Hour Forecast**: Scrollable horizontal strip with hourly temperatures and precipitation probabilities.
 - **7-Day Extended Forecast**: Daily outlook with normalized min/max temperature range bars, plus per-day max UV index and chance of precipitation.
@@ -51,6 +52,54 @@ Powered by the [Open-Meteo API](https://open-meteo.com/), SkyCast operates with 
 - **Data Freshness**: A "Updated N min ago" stamp (corrected for the city's UTC offset) plus a manual refresh button. Live conditions also auto-refresh every 10 minutes while the dashboard is visible.
 - **Dynamic Theming**: Background palette and glowing ambient orbs automatically adapt to the weather (Clear Day, Night, Rain, Thunderstorm, Snow, or Overcast). Animations respect `prefers-reduced-motion`.
 - **Zero Dependencies**: Pure HTML5, CSS3, and modern Vanilla JavaScript — runs in any web browser without Node.js or build steps.
+
+---
+
+## 👀 Today at a glance
+
+The first card on the dashboard answers the only question that matters before the forecast: *what is it like outside right now?* — city, temperature, how it feels, the sky, the three numbers that decide whether to go out, and one plain-language verdict. It spans the full width of the grid above the hero card and stays hidden until a city has actually loaded.
+
+| Surface | What it shows |
+| --- | --- |
+| **Location** | City name plus the region and country line beneath it. |
+| **Temperature** | The current reading with its unit, the "Feels like" value underneath, the condition label and its day/night vector icon. |
+| **Rain** | The **peak** chance for the rest of today — the number that decides the verdict, not a meaningless "chance right now". |
+| **Wind** | Current speed with its cardinal direction. |
+| **Humidity** | Relative humidity. |
+| **Verdict** | An icon, a headline and one sentence: 👍 *Good weather* — "Mostly dry and comfortable around 16°C with a breeze." / ☔ *Umbrella recommended* — "Rain peaks at 75% around 15:00." |
+
+### The verdict ladder
+
+Verdicts are checked in a fixed order and the **first match wins**, so the most dangerous reading always outranks the mildest. `THRESHOLDS` at the top of `glance.js` holds every cut-off:
+
+| Verdict | Wins when | Tone |
+| --- | --- | --- |
+| ⛈️ Thunderstorms expected | any thunderstorm code today | bad |
+| ❄️ Snowy today | any snow code today | warn |
+| 🧊 Freezing cold | the day's coldest "feels like" ≤ 0 °C | bad |
+| 🥵 Very hot | the day's warmest "feels like" ≥ 33 °C | bad |
+| ☔ Umbrella recommended | peak rain chance ≥ 30 %, ≥ 0.2 mm/h, or — when no probability or amount is reported at all — a rain code | caution |
+| 💨 Very windy | peak wind of the day ≥ 40 km/h | warn |
+| 👍 Good weather | none of the above | good |
+
+A rain *code* alone can never talk you into carrying an umbrella: with a reported 5 % chance and 0.0 mm the verdict stays *Good weather*, so the card can never contradict the assistant below it.
+
+### How it is built
+
+- **No second API call.** Everything comes from the `current`, `hourly` and `daily` blocks the dashboard already holds; `glance.js` adds no request, no cache and no state.
+- **Pure and deterministic.** No DOM, no clock, no randomness, no storage, and a `try`/`catch` around the whole read — the same payload always produces the same card, and even a payload that throws on property access ends as "nothing to show" rather than a blank screen. See [Personal Weather Assistant](#-personal-weather-assistant) for the same pattern applied to the assistant.
+- **No unit logic and no weather wording of its own.** The app injects `formatTemp` / `formatWindSpeed` / `getWeatherSvg` and its own `WMO_MAP`, so the °C ↔ °F toggle repaints the whole card — including the numbers inside the verdict sentence — with no refetch, and the condition wording has exactly one source.
+- **"Today" really means today.** The hourly rows are filtered to the city's *current local day* from `current.time` onwards, so a reading at 23:00 is judged on the evening rather than on the whole 24-hour payload; the daily block is only a fallback for payloads with no usable hourly rows.
+- **Missing is not zero.** An absent reading renders as `--`, is left out of the verdict, and never becomes a confident guess; if neither temperature nor a weather code is usable the card hides itself instead of painting an empty shell.
+- **Accessible by construction.** The card is a `role="status"` live region, the metric tiles are a `role="list"` with screen-reader hints that spell out what each number means ("peak chance today"), and the verdict icon is `aria-hidden` because the headline already says the same thing.
+
+### Running the tests
+
+`tests/glance.test.js` covers the logic (metric fallbacks, today's rain peak and its hour, the verdict ladder and its precedence, unit delegation, hostile payloads) and `tests/glance-wiring.test.js` covers the glue (browser global, script order, element bindings, card placement, `textContent` escaping, styling and the accessibility wiring):
+
+```powershell
+node --test
+```
 
 ---
 
@@ -268,11 +317,14 @@ Test_001/
 ├── index.html        # Semantic HTML5 app markup, ARIA wiring, City / Compare / Climate mode switchers
 ├── styles.css        # Glassmorphic CSS styling, dynamic themes, climate results grid, comparison tables, reduced-motion support
 ├── app.js            # Batch climate queries, unit-aware filter parser, weather controller, comparison UI
+├── glance.js         # "Today at a glance" engine (pure: current conditions, today's rain peak, verdict)
 ├── advice.js         # Personal Weather Assistant engine (pure, unit-agnostic, no DOM access)
 ├── compare.js        # Compare Locations engine (pure: selection, metrics, thresholds, insights)
 ├── tests/
 │   ├── advice.test.js         # Recommendation logic: thresholds, units, scope, missing data, determinism
 │   ├── wiring.test.js         # Dashboard glue: global, script order, element bindings, escaping, styling
+│   ├── glance.test.js         # Glance logic: metric fallbacks, today's rain peak, verdict ladder, hostile payloads
+│   ├── glance-wiring.test.js  # Glance glue: script order, element ids, card placement, escaping, styling, a11y
 │   ├── compare.test.js        # Comparison engine: selection limits, per-column failure, thresholds, wording
 │   ├── compare-wiring.test.js # Comparison glue: script order, element ids, tab semantics, escaping, styling
 │   └── compare-runtime.test.js# App booted against a DOM stub: modes, fetch, retry, units, clearing
