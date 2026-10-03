@@ -4572,6 +4572,23 @@ const icon = document.createElement('span');
         });
       });
     }
+    // Language toggle buttons
+    const langBtns = document.querySelectorAll('.lang-btn');
+    langBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        langBtns.forEach(b => {
+          b.classList.remove('active');
+          b.setAttribute('aria-checked', 'false');
+        });
+        btn.classList.add('active');
+        btn.setAttribute('aria-checked', 'true');
+        const lang = btn.dataset.lang;
+        if (window.I18n) {
+          window.I18n.setLanguage(lang);
+        }
+      });
+    });
+
     if (elements.shareBtn) {
       elements.shareBtn.addEventListener('click', function() {
         shareWeather();
@@ -4697,7 +4714,50 @@ const icon = document.createElement('span');
   // ==========================================================================
   // Initialization
   // ==========================================================================
+  async function detectAndSetLanguage() {
+    try {
+      // Check if user already has a saved preference
+      if (window.I18n && localStorage.getItem('weatherscope_lang')) {
+        return;
+      }
+      // Try to detect location via IP
+      const response = await fetch('http://ip-api.com/json/?fields=status,countryCode', { timeout: 3000 });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === 'success') {
+          if (data.countryCode === 'GR' || data.countryCode === 'EL') {
+            if (window.I18n) window.I18n.setLanguage('el');
+          } else if (data.countryCode === 'DE' || data.countryCode === 'AT' || data.countryCode === 'CH') {
+            if (window.I18n) window.I18n.setLanguage('de');
+          } else {
+            if (window.I18n) window.I18n.setLanguage('en');
+          }
+        }
+      }
+    } catch (e) {
+      // Fallback to English
+      if (window.I18n) window.I18n.setLanguage('en');
+    }
+  }
+
   function init() {
+    // Initialize i18n if available
+    if (window.I18n && window.I18n.init) {
+      window.I18n.init();
+    }
+    // Detect and set language based on location (IP)
+    detectAndSetLanguage().then(() => {
+      const lang = window.I18n ? window.I18n.getLanguage() : 'en';
+      const langBtns = document.querySelectorAll('.lang-btn');
+      langBtns.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.lang === lang);
+        btn.setAttribute('aria-checked', btn.dataset.lang === lang ? 'true' : 'false');
+      });
+      if (window.I18n && window.I18n.applyTranslations) {
+        try { window.I18n.applyTranslations(); } catch (e) {}
+      }
+    });
+
     setupEvents();
 
     // Establish the initial tab state through the same code path the tabs use,
