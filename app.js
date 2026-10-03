@@ -8,6 +8,53 @@
   'use strict';
 
   // ==========================================================================
+  // Translation helper
+  // --------------------------------------------------------------------------
+  // The browser always has i18n.js loaded before this file, but the pure-engine
+  // unit tests boot app.js on its own, so `window.I18n` may legitimately be
+  // absent. Every call therefore carries its own English literal: the active
+  // language wins when it is available, and the authored English string is the
+  // fallback otherwise. That keeps the engines and their tests deterministic
+  // while the browser renders whatever the visitor picked.
+  // ==========================================================================
+  const INTERPOLATION = /\{(\w+)\}/g;
+
+  function interpolate(template, vars) {
+    if (typeof template !== 'string' || !vars) return template;
+    return template.replace(INTERPOLATION, (match, name) =>
+      Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : match
+    );
+  }
+
+  function t(key, vars, englishFallback) {
+    if (window.I18n && typeof window.I18n.t === 'function') {
+      const translated = window.I18n.t(key, vars);
+      // i18n.t returns the key itself when it has no entry, which is the signal
+      // to fall back to the English literal this call site already carries.
+      if (translated && translated !== key) return translated;
+    }
+    const source = englishFallback === undefined ? key : englishFallback;
+    return interpolate(source, vars);
+  }
+
+  /** Pick between a singular/plural pair of dictionary keys. */
+  function tp(oneKey, manyKey, count, vars, englishOne, englishMany) {
+    const key = count === 1 ? oneKey : manyKey;
+    const fallback = count === 1 ? englishOne : englishMany;
+    return t(key, Object.assign({ count }, vars), fallback);
+  }
+
+  /** A condition label for a WMO code in the active language. */
+  function conditionText(code) {
+    if (window.I18n && typeof window.I18n.conditionLabel === 'function') {
+      const label = window.I18n.conditionLabel(code);
+      if (label) return label;
+    }
+    const info = WMO_MAP[code];
+    return (info && info.label) || t('wmo.unknown', null, 'Clear');
+  }
+
+  // ==========================================================================
   // Curated Global Cities Database for Climate Searches (Diverse Climates)
   // ==========================================================================
   const WORLD_CITIES = [
@@ -368,7 +415,7 @@
    */
   function describeTimeDifference(timeZone, date) {
     const diff = getOffsetDiffMinutes(timeZone, date);
-    if (diff === 0) return 'Same time as you';
+    if (diff === 0) return t('time.sameAsYou', null, 'Same time as you');
 
     const ahead = diff > 0;
     const abs = Math.abs(diff);
@@ -384,13 +431,15 @@
       magnitude = `${hours}h ${minutes}m`;
     }
 
-    return `${magnitude} ${ahead ? 'ahead of' : 'behind'} you`;
+    return ahead
+      ? t('time.aheadOf', { value: magnitude }, `${magnitude} ahead of you`)
+      : t('time.behind', { value: magnitude }, `${magnitude} behind you`);
   }
 
   /** Compact form for tight spaces, e.g. "+5h30m" / "Same". */
   function formatOffsetDiffCompact(timeZone, date) {
     const diff = getOffsetDiffMinutes(timeZone, date);
-    if (diff === 0) return 'Same time';
+    if (diff === 0) return t('time.sameAsYouShort', null, 'Same time');
 
     const sign = diff > 0 ? '+' : '-';
     const abs = Math.abs(diff);
@@ -497,10 +546,22 @@
 
     if (elements.userClockZone) {
       elements.userClockZone.textContent = getZoneAbbreviation(USER_TIME_ZONE, new Date());
-      elements.userClockZone.title = `Detected timezone: ${USER_TIME_ZONE}`;
+      elements.userClockZone.title = t('time.detectedZone', { zone: USER_TIME_ZONE }, `Detected timezone: ${USER_TIME_ZONE}`);
+      elements.userClockZone.setAttribute('aria-label', t(
+        'time.localTimeAria',
+        { zone: USER_TIME_ZONE },
+        `Your local time, detected from your timezone ${USER_TIME_ZONE}`
+      ));
     }
     if (elements.footerUserZone) {
       elements.footerUserZone.textContent = USER_TIME_ZONE;
+    }
+    if (elements.footerTimezoneNote) {
+      elements.footerTimezoneNote.textContent = t(
+        'footer.timezoneNote',
+        { zone: USER_TIME_ZONE },
+        `Local times use each city's IANA timezone and tick in real time · Your reference time is detected from your device timezone (${USER_TIME_ZONE})`
+      );
     }
 
     // The digits are hidden from AT (see hideVolatileNode), so name the control
@@ -573,7 +634,9 @@
       const label = describeTimeDifference(zone, now);
       if (elements.cityTimeDiff.textContent === label) return;
       elements.cityTimeDiff.textContent = label;
-      elements.cityTimeDiff.classList.toggle('is-same', label === 'Same time as you');
+      // Compare the offset itself rather than the rendered label, which is
+      // now written in the active language.
+      elements.cityTimeDiff.classList.toggle('is-same', getOffsetDiffMinutes(zone, now) === 0);
     });
 
     // --- Current Conditions metric card: clock, date, offset, your clock ---
@@ -594,19 +657,20 @@
     });
 
     addVolatile(elements.metricUserTime, (zone, now) => {
-      elements.metricUserTime.textContent = `You ${formatClock(USER_TIME_ZONE, now)}`;
-      elements.metricUserTime.title = `Your timezone: ${USER_TIME_ZONE}`;
+      const clock = formatClock(USER_TIME_ZONE, now);
+      elements.metricUserTime.textContent = t('time.youClock', { time: clock }, `You ${clock}`);
+      elements.metricUserTime.title = t('time.yourZoneTitle', { zone: USER_TIME_ZONE }, `Your timezone: ${USER_TIME_ZONE}`);
     });
 
     // --- Forecast headers: remind the reader which clock the hours refer to ---
     add(elements.hourlyTzLabel, (zone, now) => {
       elements.hourlyTzLabel.textContent = getZoneAbbreviation(zone, now);
-      elements.hourlyTzLabel.title = `All times in ${zone}`;
+      elements.hourlyTzLabel.title = t('time.allTimesIn', { zone }, `All times in ${zone}`);
     });
 
     add(elements.dailyTzLabel, (zone, now) => {
       elements.dailyTzLabel.textContent = getZoneAbbreviation(zone, now);
-      elements.dailyTzLabel.title = `All times in ${zone}`;
+      elements.dailyTzLabel.title = t('time.allTimesIn', { zone }, `All times in ${zone}`);
     });
 
     heroClockId = registerClock(timeZone, targets, () =>
@@ -754,6 +818,7 @@
     userClockZone: document.getElementById('user-clock-zone'),
     userClock: document.getElementById('user-clock'),
     footerUserZone: document.getElementById('footer-user-zone'),
+    footerTimezoneNote: document.getElementById('footer-timezone-note'),
     hourlyTzLabel: document.getElementById('hourly-tz-label'),
     dailyTzLabel: document.getElementById('daily-tz-label'),
 
@@ -1096,17 +1161,17 @@
   }
 
   function getUvInfo(uv) {
-    if (uv <= 2) return { text: 'Low', badgeClass: 'low', advice: 'Low risk of sun damage' };
-    if (uv <= 5) return { text: 'Moderate', badgeClass: 'moderate', advice: 'Sun protection advised' };
-    if (uv <= 7) return { text: 'High', badgeClass: 'high', advice: 'Wear hat and sunscreen' };
-    if (uv <= 10) return { text: 'Very High', badgeClass: 'very-high', advice: 'Avoid sun during midday' };
-    return { text: 'Extreme', badgeClass: 'extreme', advice: 'Take full sun precautions' };
+    if (uv <= 2) return { text: t('metrics.uvLow', null, 'Low'), badgeClass: 'low', advice: t('metrics.uvAdviceLow', null, 'Low risk of sun damage') };
+    if (uv <= 5) return { text: t('metrics.uvModerate', null, 'Moderate'), badgeClass: 'moderate', advice: t('metrics.uvAdviceModerate', null, 'Sun protection advised') };
+    if (uv <= 7) return { text: t('metrics.uvHigh', null, 'High'), badgeClass: 'high', advice: t('metrics.uvAdviceHigh', null, 'Wear hat and sunscreen') };
+    if (uv <= 10) return { text: t('metrics.uvVeryHigh', null, 'Very High'), badgeClass: 'very-high', advice: t('metrics.uvAdviceVeryHigh', null, 'Avoid sun during midday') };
+    return { text: t('metrics.uvExtreme', null, 'Extreme'), badgeClass: 'extreme', advice: t('metrics.uvAdviceExtreme', null, 'Take full sun precautions') };
   }
 
   function getHumidityStatus(val) {
-    if (val < 30) return 'Dry environment';
-    if (val <= 60) return 'Comfortable humidity';
-    return 'High humidity';
+    if (val < 30) return t('metrics.humidityDry', null, 'Dry environment');
+    if (val <= 60) return t('metrics.humidityComfortable', null, 'Comfortable humidity');
+    return t('metrics.humidityHigh', null, 'High humidity');
   }
 
   /**
@@ -1122,12 +1187,16 @@
     const instant = parsed - (utcOffsetSeconds || 0) * 1000;
     const diffMin = Math.floor((Date.now() - instant) / 60000);
 
-    if (diffMin < 1) return 'Updated just now';
-    if (diffMin < 60) return `Updated ${diffMin} min ago`;
+    if (diffMin < 1) return t('time.freshnessNow', null, 'Updated just now');
+    if (diffMin < 60) return t('time.freshnessMinutes', { count: diffMin }, `Updated ${diffMin} min ago`);
     const hours = Math.floor(diffMin / 60);
-    if (hours < 24) return `Updated ${hours} hour${hours === 1 ? '' : 's'} ago`;
+    if (hours < 24) {
+      return tp('time.freshnessHours', 'time.freshnessHoursPlural', hours,
+        { count: hours }, `Updated ${hours} hour ago`, `Updated ${hours} hours ago`);
+    }
     const days = Math.floor(hours / 24);
-    return `Updated ${days} day${days === 1 ? '' : 's'} ago`;
+    return tp('time.freshnessDays', 'time.freshnessDaysPlural', days,
+      { count: days }, `Updated ${days} day ago`, `Updated ${days} days ago`);
   }
 
 // ==========================================================================
@@ -1662,7 +1731,7 @@
       precipSymbol: getPrecipUnitSymbol(),
       percent: (value) => `${Math.round(value)}%`,
       cardinal: getWindCardinal,
-      conditionLabel: (code) => (WMO_MAP[code] || { label: 'Clear' }).label,
+      conditionLabel: conditionText,
     };
   }
 
@@ -1679,6 +1748,7 @@
         currentTime: data.current ? data.current.time : null,
         city: state.currentCity,
         format: glanceFormat(),
+        t: window.I18n && typeof window.I18n.t === 'function' ? window.I18n.t : null,
       });
     } catch (err) {
       // The engine is defensive by design, but a bug here must never take the
@@ -1897,7 +1967,7 @@
 
     // Weather Condition
     const condition = WMO_MAP[current.weather_code] || { label: 'Clear', icon: 'clear' };
-    elements.conditionText.textContent = condition.label;
+    elements.conditionText.textContent = conditionText(current.weather_code);
 
     // Large Hero Icon
     elements.heroWeatherIcon.innerHTML = getWeatherSvg(condition.icon, current.is_day);
@@ -1934,12 +2004,20 @@
 
     // Air Pressure
     elements.pressureVal.textContent = Math.round(current.pressure_msl ?? 1013);
-    elements.pressureStatus.textContent = current.pressure_msl > 1015 ? 'High pressure system' : (current.pressure_msl < 1005 ? 'Low pressure system' : 'Normal pressure');
+    elements.pressureStatus.textContent = current.pressure_msl > 1015
+      ? t('metrics.pressureHigh', null, 'High pressure system')
+      : (current.pressure_msl < 1005
+        ? t('metrics.pressureLow', null, 'Low pressure system')
+        : t('metrics.pressureNormal', null, 'Normal pressure'));
 
     // Cloud & Precip
     elements.precipVal.textContent = formatPrecip(current.precipitation);
     elements.precipUnitDisplay.textContent = getPrecipUnitSymbol();
-    elements.cloudCoverStatus.textContent = `Cloud cover: ${Math.round(current.cloud_cover ?? 0)}%`;
+    elements.cloudCoverStatus.textContent = t(
+      'metrics.cloudCover',
+      { value: Math.round(current.cloud_cover ?? 0) },
+      `Cloud cover: ${Math.round(current.cloud_cover ?? 0)}%`
+    );
 
     // Sun Times
     if (daily && daily.sunrise && daily.sunset && daily.sunrise.length > 0) {
@@ -1984,7 +2062,11 @@
     // Show Back Button if user came from climate search
     if (state.matchingCities.length > 0) {
       elements.backToResultsBar.classList.remove('hidden');
-      elements.backToResultsText.textContent = `Back to matching cities (${state.matchingCities.length} found)`;
+      elements.backToResultsText.textContent = t(
+        'climate.backToMatching',
+        { count: state.matchingCities.length },
+        `Back to matching cities (${state.matchingCities.length} found)`
+      );
     } else {
       elements.backToResultsBar.classList.add('hidden');
     }
@@ -2135,8 +2217,8 @@
 
     if (elements.assistantScope) {
       elements.assistantScope.textContent = profile.scope === 'next24'
-        ? 'Based on the next 24 hours'
-        : 'Based on the rest of today';
+        ? t('assistant.scopeNext24', null, 'Based on the next 24 hours')
+        : t('assistant.scopeToday', null, 'Based on the rest of today');
     }
 
     // --- Headline -----------------------------------------------------------
@@ -2788,15 +2870,15 @@
   function buildSortOptions(criteria) {
     const options = SORT_DIMENSIONS.filter((dimension) => dimension.applies(criteria)).flatMap(
       (dimension) => [
-        { value: `${dimension.key}-desc`, label: `${dimension.label} (higher to lower)` },
-        { value: `${dimension.key}-asc`, label: `${dimension.label} (lower to higher)` },
+        { value: `${dimension.key}-desc`, label: t('climate.sortHighToLow', { label: t(`climate.sort${dimension.key === 'temp' ? 'Temperature' : dimension.key === 'humidity' ? 'Humidity' : 'Wind'}`, null, dimension.label) }, `${dimension.label} (higher to lower)`) },
+        { value: `${dimension.key}-asc`, label: t('climate.sortLowToHigh', { label: t(`climate.sort${dimension.key === 'temp' ? 'Temperature' : dimension.key === 'humidity' ? 'Humidity' : 'Wind'}`, null, dimension.label) }, `${dimension.label} (lower to higher)`) },
       ]
     );
 
     // Name sorting needs no filter to justify it and no reading to resolve it,
     // so it stays available for purely categorical filters (Sunny, Storm, ...)
-    options.push({ value: 'name-asc', label: 'City name (A-Z)' });
-    options.push({ value: 'name-desc', label: 'City name (Z-A)' });
+    options.push({ value: 'name-asc', label: t('climate.sortNameAsc', null, 'City name (A-Z)') });
+    options.push({ value: 'name-desc', label: t('climate.sortNameDesc', null, 'City name (Z-A)') });
 
     return options;
   }
@@ -2850,7 +2932,10 @@
 
   /** Deterministic tie-breaker, also the comparator for name-only sorts. */
   function compareCityNames(a, b) {
-    return a.city.name.localeCompare(b.city.name, 'en');
+    const locale = window.I18n && typeof window.I18n.locale === 'function'
+      ? window.I18n.locale()
+      : 'en';
+    return a.city.name.localeCompare(b.city.name, locale);
   }
 
   function sortClimateEntries(entries, sortValue) {
@@ -2892,13 +2977,19 @@
     elements.errorState.classList.add('hidden');
 
     // Title and Count
-    elements.climateResultsTitle.textContent = 'Cities matching climate conditions';
-    elements.climateResultsCount.textContent = `${matchingEntries.length} ${matchingEntries.length === 1 ? 'city' : 'cities'} found`;
+    elements.climateResultsTitle.textContent = t('climate.resultsTitle', null, 'Cities matching climate conditions');
+    elements.climateResultsCount.textContent = tp(
+      'climate.foundOne', 'climate.foundMany', matchingEntries.length, null,
+      `${matchingEntries.length} city found`, `${matchingEntries.length} cities found`
+    );
 
     // Be explicit that results are scoped to the curated benchmark dataset
-    elements.climateResultsSubtitle.textContent =
+    elements.climateResultsSubtitle.textContent = t(
+      'climate.resultsSubtitle',
+      { count: WORLD_CITIES.length },
       `Searched ${WORLD_CITIES.length} benchmark cities worldwide. ` +
-      'Click any city to explore its detailed real-time weather and 7-day outlook.';
+      'Click any city to explore its detailed real-time weather and 7-day outlook.'
+    );
 
     // Active tags - criteria.tokens is preserved across sort/unit re-renders
     // because callers re-parse with state.activeFilterTags (#1)
@@ -3045,8 +3136,7 @@
       // The one place a WMO code becomes text: the app's existing mapping.
       conditionLabel: (code) => {
         if (code === null || code === undefined) return '--';
-        const info = WMO_MAP[code];
-        return info ? info.label : 'Clear';
+        return conditionText(code);
       },
     };
   }
@@ -3833,7 +3923,7 @@ const icon = document.createElement('span');
     elements.dashboard.classList.add('hidden');
     elements.climateResultsSection.classList.add('hidden');
     elements.errorState.classList.add('hidden');
-    elements.loadingText.textContent = `Fetching live weather for ${city.name}...`;
+    elements.loadingText.textContent = t('state.fetchingCity', { city: city.name }, `Fetching live weather for ${city.name}...`);
     elements.loadingState.classList.remove('hidden');
 
     closeAutocomplete();
@@ -3866,7 +3956,7 @@ const icon = document.createElement('span');
     elements.dashboard.classList.add('hidden');
     elements.climateResultsSection.classList.add('hidden');
     elements.errorState.classList.add('hidden');
-    elements.loadingText.textContent = 'Searching worldwide cities matching preferred climate...';
+    elements.loadingText.textContent = t('climate.searching', null, 'Searching worldwide cities matching preferred climate...');
     elements.loadingState.classList.remove('hidden');
 
     try {
@@ -3907,7 +3997,7 @@ const icon = document.createElement('span');
     elements.dashboard.classList.add('hidden');
     elements.climateResultsSection.classList.add('hidden');
     elements.errorState.classList.add('hidden');
-    elements.loadingText.textContent = `Searching for "${cityName}"...`;
+    elements.loadingText.textContent = t('search.searchingFor', { city: cityName }, `Searching for "${cityName}"...`);
     elements.loadingState.classList.remove('hidden');
 
     try {
@@ -4160,12 +4250,12 @@ const icon = document.createElement('span');
     // The compare surface has its own inline feedback, so it must not have the
     // dashboard's full-screen loading state dropped over it.
     if (toCompare) {
-      setCompareNotice('Detecting your geographical location...');
+      setCompareNotice(t('geo.detecting', null, 'Detecting your geographical location...'));
     } else {
       elements.dashboard.classList.add('hidden');
       elements.climateResultsSection.classList.add('hidden');
       elements.errorState.classList.add('hidden');
-      elements.loadingText.textContent = 'Detecting your geographical location...';
+      elements.loadingText.textContent = t('geo.detecting', null, 'Detecting your geographical location...');
       elements.loadingState.classList.remove('hidden');
     }
 
@@ -4225,9 +4315,9 @@ const icon = document.createElement('span');
   // ==========================================================================
   /** The three modes, in tab order, with the search placeholder each owns. */
   const MODES = [
-    { mode: 'city', placeholder: 'Search for a city (e.g. Paris, Tokyo, New York)...' },
-    { mode: 'compare', placeholder: 'Add a location to compare (e.g. Athens, Oslo, Cairo)...' },
-    { mode: 'climate', placeholder: 'Search climate: e.g. Sunny, Warm, Rain, Snow, > 25°C, Cold < 10°C...' },
+    { mode: 'city', placeholderKey: 'search.placeholderCity', placeholder: 'Search for a city (e.g. Paris, Tokyo, New York)...' },
+    { mode: 'compare', placeholderKey: 'search.placeholderCompare', placeholder: 'Add a location to compare (e.g. Athens, Oslo, Cairo)...' },
+    { mode: 'climate', placeholderKey: 'search.placeholderClimate', placeholder: 'Search climate: e.g. Sunny, Warm, Rain, Snow, > 25°C, Cold < 10°C...' },
   ];
 
   function modeTab(mode) {
@@ -4261,7 +4351,7 @@ const icon = document.createElement('span');
     });
 
     const activeMode = MODES.find((entry) => entry.mode === mode) || MODES[0];
-    elements.searchInput.placeholder = activeMode.placeholder;
+    elements.searchInput.placeholder = t(activeMode.placeholderKey, null, activeMode.placeholder);
     elements.quickCitiesContainer.classList.toggle('hidden', mode === 'climate');
     elements.climateChipsContainer.classList.toggle('hidden', mode !== 'climate');
 
@@ -4715,29 +4805,15 @@ const icon = document.createElement('span');
   // Initialization
   // ==========================================================================
   async function detectAndSetLanguage() {
-    try {
-      // Check if user already has a saved preference
-      if (window.I18n && localStorage.getItem('weatherscope_lang')) {
-        return;
-      }
-      // Try to detect location via IP
-      const response = await fetch('http://ip-api.com/json/?fields=status,countryCode', { timeout: 3000 });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.status === 'success') {
-          if (data.countryCode === 'GR' || data.countryCode === 'EL') {
-            if (window.I18n) window.I18n.setLanguage('el');
-          } else if (data.countryCode === 'DE' || data.countryCode === 'AT' || data.countryCode === 'CH') {
-            if (window.I18n) window.I18n.setLanguage('de');
-          } else {
-            if (window.I18n) window.I18n.setLanguage('en');
-          }
-        }
-      }
-    } catch (e) {
-      // Fallback to English
-      if (window.I18n) window.I18n.setLanguage('en');
-    }
+    if (!window.I18n || typeof window.I18n.detectLanguage !== 'function') return;
+    const detected = await window.I18n.detectLanguage();
+    if (!detected || !detected.lang) return;
+
+    // `init()` has already honoured an explicit query or stored preference.
+    // Detection is only allowed to paint a first-time visitor and never writes
+    // over a deliberate choice.
+    if (detected.source === 'query' || detected.source === 'stored') return;
+    window.I18n.setLanguage(detected.lang, { persist: false });
   }
 
   function init() {
@@ -4745,7 +4821,27 @@ const icon = document.createElement('span');
     if (window.I18n && window.I18n.init) {
       window.I18n.init();
     }
-    // Detect and set language based on location (IP)
+
+    if (window.I18n && typeof window.I18n.onChange === 'function') {
+      window.I18n.onChange(() => {
+        setMode(state.searchMode);
+        refreshChipThresholds();
+        if (elements.footerTimezoneNote) {
+          elements.footerTimezoneNote.textContent = t(
+            'footer.timezoneNote',
+            { zone: USER_TIME_ZONE },
+            `Local times use each city's IANA timezone and tick in real time · Your reference time is detected from your device timezone (${USER_TIME_ZONE})`
+          );
+        }
+        if (state.weatherData && !elements.dashboard.classList.contains('hidden')) renderWeather();
+        if (state.matchingCities.length && !elements.climateResultsSection.classList.contains('hidden')) {
+          renderClimateResults(state.matchingCities, currentClimateCriteria());
+        }
+        if (isCompareVisible()) renderCompareSection();
+      });
+    }
+
+    // Detect and set language for a first-time visitor (IP/browser/timezone).
     detectAndSetLanguage().then(() => {
       const lang = window.I18n ? window.I18n.getLanguage() : 'en';
       const langBtns = document.querySelectorAll('.lang-btn');
@@ -4753,9 +4849,6 @@ const icon = document.createElement('span');
         btn.classList.toggle('active', btn.dataset.lang === lang);
         btn.setAttribute('aria-checked', btn.dataset.lang === lang ? 'true' : 'false');
       });
-      if (window.I18n && window.I18n.applyTranslations) {
-        try { window.I18n.applyTranslations(); } catch (e) {}
-      }
     });
 
     setupEvents();

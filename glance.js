@@ -97,19 +97,45 @@
   // that is actually present is the one that is reported.
   // ==========================================================================
   const VERDICTS = {
-    storm: { id: 'storm', tone: 'bad', icon: '\u26A8\uFE0F', text: 'Thunderstorms expected' },
-    snow: { id: 'snow', tone: 'warn', icon: '\u2744\uFE0F', text: 'Snowy today' },
-    freezing: { id: 'freezing', tone: 'bad', icon: '\uD83E\uDD76', text: 'Freezing cold' },
-    hot: { id: 'hot', tone: 'bad', icon: '\uD83E\uDD75', text: 'Very hot' },
-    umbrella: { id: 'umbrella', tone: 'caution', icon: '\u2614', text: 'Umbrella recommended' },
-    gale: { id: 'gale', tone: 'warn', icon: '\uD83D\uDCA8', text: 'Very windy' },
-    good: { id: 'good', tone: 'good', icon: '\uD83D\uDC4D', text: 'Good weather' },
+    storm: { id: 'storm', tone: 'bad', icon: '\u26A8\uFE0F', key: 'glanceEngine.storm', text: 'Thunderstorms expected' },
+    snow: { id: 'snow', tone: 'warn', icon: '\u2744\uFE0F', key: 'glanceEngine.snow', text: 'Snowy today' },
+    freezing: { id: 'freezing', tone: 'bad', icon: '\uD83E\uDD76', key: 'glanceEngine.freezing', text: 'Freezing cold' },
+    hot: { id: 'hot', tone: 'bad', icon: '\uD83E\uDD75', key: 'glanceEngine.hot', text: 'Very hot' },
+    umbrella: { id: 'umbrella', tone: 'caution', icon: '\u2614', key: 'glanceEngine.umbrella', text: 'Umbrella recommended' },
+    gale: { id: 'gale', tone: 'warn', icon: '\uD83D\uDCA8', key: 'glanceEngine.gale', text: 'Very windy' },
+    good: { id: 'good', tone: 'good', icon: '\uD83D\uDC4D', key: 'glanceEngine.good', text: 'Good weather' },
   };
 
   /** Every verdict in the order it is evaluated. */
   const VERDICT_ORDER = ['storm', 'snow', 'freezing', 'hot', 'umbrella', 'gale', 'good'];
 
   const UNKNOWN = '--';
+
+  // ==========================================================================
+  // Translation
+  // --------------------------------------------------------------------------
+  // The engine stays pure and unit-testable: the caller injects `t` (i18n.js in
+  // the browser), and when it is absent every string falls back to the exact
+  // English literal below. `glance.test.js` therefore runs unchanged.
+  // ==========================================================================
+  const INTERPOLATION = /\{(\w+)\}/g;
+
+  function interpolate(template, vars) {
+    if (typeof template !== 'string' || !vars) return template;
+    return template.replace(INTERPOLATION, (match, name) =>
+      Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : match
+    );
+  }
+
+  /** A no-op translator: returns the English fallback exactly as authored. */
+  function defaultT(_key, vars, englishFallback) {
+    const source = englishFallback === undefined ? '' : englishFallback;
+    return interpolate(source, vars);
+  }
+
+  function resolveT(source) {
+    return source && typeof source.t === 'function' ? source.t : defaultT;
+  }
 
   // ==========================================================================
   // Small helpers
@@ -215,12 +241,12 @@
     return `${format.precip(mm)} ${format.precipSymbol}`;
   }
 
-  function windDescriptor(kmh) {
+  function windDescriptor(kmh, t) {
     if (!isNum(kmh)) return null;
-    if (kmh <= 12) return 'light wind';
-    if (kmh <= THRESHOLDS.wind.breezyKmh) return 'a breeze';
-    if (kmh <= THRESHOLDS.wind.galeKmh) return 'strong wind';
-    return 'very strong wind';
+    if (kmh <= 12) return t('glanceEngine.windLight', null, 'light wind');
+    if (kmh <= THRESHOLDS.wind.breezyKmh) return t('glanceEngine.windBreeze', null, 'a breeze');
+    if (kmh <= THRESHOLDS.wind.galeKmh) return t('glanceEngine.windStrong', null, 'strong wind');
+    return t('glanceEngine.windVeryStrong', null, 'very strong wind');
   }
 
   // ==========================================================================
@@ -349,10 +375,10 @@
   // ==========================================================================
 
   /** " around 15:00", but only when the hour is actually ahead of us. */
-  function whenText(hour, currentHour) {
+  function whenText(hour, currentHour, t) {
     if (!hour || !isNum(hour.hour)) return '';
     if (isNum(currentHour) && hour.hour <= currentHour) return '';
-    return ` around ${hourLabel(hour.hour)}`;
+    return t('glanceEngine.around', { time: hourLabel(hour.hour) }, ' around {time}');
   }
 
   function currentHourOf(ctx) {
@@ -362,54 +388,99 @@
   }
 
   /** Detail lines. Short on purpose: this is read at a glance, not studied. */
-  function verdictDetail(key, cond, nowHour) {
+  function verdictDetail(key, cond, nowHour, t) {
     const format = cond.format;
 
     if (key === 'storm') {
       const stormHour = (cond.hours.find((hour) => STORM_CODES.has(hour.code)) || null);
-      return `Thunderstorms are forecast${whenText(stormHour, nowHour)} \u2014 outdoor plans may be cut short.`;
+      const when = whenText(stormHour, nowHour, t);
+      return t(
+        'glanceEngine.detailStorm',
+        { when },
+        `Thunderstorms are forecast${when} \u2014 outdoor plans may be cut short.`
+      );
     }
 
     if (key === 'snow') {
       const snowHour = cond.hours.find((hour) => SNOW_CODES.has(hour.code)) || null;
-      return `Snow is forecast${whenText(snowHour, nowHour)} \u2014 allow extra travel time.`;
+      const when = whenText(snowHour, nowHour, t);
+      return t(
+        'glanceEngine.detailSnow',
+        { when },
+        `Snow is forecast${when} \u2014 allow extra travel time.`
+      );
     }
 
     if (key === 'freezing') {
-      const when = cond.coldestHour && isNum(cond.coldestHour.hour) ? ` at ${hourLabel(cond.coldestHour.hour)}` : '';
-      return `Feels like ${tempText(format, cond.coldest)}${when} \u2014 heavy layers needed.`;
+      const when = cond.coldestHour && isNum(cond.coldestHour.hour)
+        ? t('glanceEngine.at', { time: hourLabel(cond.coldestHour.hour) }, ' at {time}')
+        : '';
+      return t(
+        'glanceEngine.detailFreezing',
+        { temp: tempText(format, cond.coldest), when },
+        `Feels like ${tempText(format, cond.coldest)}${when} \u2014 heavy layers needed.`
+      );
     }
 
     if (key === 'hot') {
-      const when = cond.warmestHour && isNum(cond.warmestHour.hour) ? ` at ${hourLabel(cond.warmestHour.hour)}` : '';
-      return `Feels like ${tempText(format, cond.warmest)}${when} \u2014 seek shade and hydrate.`;
+      const when = cond.warmestHour && isNum(cond.warmestHour.hour)
+        ? t('glanceEngine.at', { time: hourLabel(cond.warmestHour.hour) }, ' at {time}')
+        : '';
+      return t(
+        'glanceEngine.detailHot',
+        { temp: tempText(format, cond.warmest), when },
+        `Feels like ${tempText(format, cond.warmest)}${when} \u2014 seek shade and hydrate.`
+      );
     }
 
     if (key === 'umbrella') {
       if (isNum(cond.nowMm) && cond.nowMm > 0) {
         const amount = precipText(format, cond.nowMm);
         return amount
-          ? `Rain is falling right now (${amount} in the last hour).`
-          : 'Rain is falling right now.';
+          ? t(
+              'glanceEngine.detailRainNow',
+              { amount },
+              `Rain is falling right now (${amount} in the last hour).`
+            )
+          : t('glanceEngine.detailRainNowShort', null, 'Rain is falling right now.');
       }
       if (isNum(cond.rainChance)) {
-        return `Rain peaks at ${Math.round(cond.rainChance)}%${whenText(cond.peakRainHour, nowHour)}.`;
+        const when = whenText(cond.peakRainHour, nowHour, t);
+        return t(
+          'glanceEngine.detailRainPeak',
+          { value: Math.round(cond.rainChance), when },
+          `Rain peaks at ${Math.round(cond.rainChance)}%${when}.`
+        );
       }
-      return 'Light precipitation is expected today.';
+      return t('glanceEngine.detailLightPrecip', null, 'Light precipitation is expected today.');
     }
 
     if (key === 'gale') {
       const peak = windText(format, cond.windPeak);
-      return peak ? `Winds reach ${peak} today \u2014 a blustery day out.` : 'Very windy today.';
+      return peak
+        ? t(
+            'glanceEngine.detailWinds',
+            { value: peak },
+            `Winds reach ${peak} today \u2014 a blustery day out.`
+          )
+        : t('glanceEngine.detailVeryWindy', null, 'Very windy today.');
     }
 
     // The "good weather" detail states *why* the day reads as good.
     const range = tempRangeText(format, cond.coldest, cond.warmest);
-    const wind = windDescriptor(cond.windPeak);
+    const wind = windDescriptor(cond.windPeak, t);
     const damp = isNum(cond.rainChance) && cond.rainChance >= THRESHOLDS.rain.dryChance;
-    const parts = [damp ? 'Mostly dry' : 'Dry'];
-    if (range) parts.push(`and comfortable around ${range}`);
-    if (wind) parts.push(`with ${wind}`);
+    const parts = [
+      damp
+        ? t('glanceEngine.detailMostlyDry', null, 'Mostly dry')
+        : t('glanceEngine.detailDry', null, 'Dry'),
+    ];
+    if (range) {
+      parts.push(t('glanceEngine.detailComfortable', { value: range }, `and comfortable around ${range}`));
+    }
+    if (wind) {
+      parts.push(t('glanceEngine.detailWithWind', { value: wind }, `with ${wind}`));
+    }
     return `${parts.join(' ')}.`;
   }
 
@@ -445,7 +516,7 @@
    * screen-reader `hint` spelling out what the number means, because "Rain 20%"
    * alone is ambiguous: 20% chance *now*, or 20% chance *today*?
    */
-  function buildMetrics(cond, current) {
+  function buildMetrics(cond, current, t) {
     const format = cond.format;
     const rainValue = isNum(cond.rainChance) ? format.percent(cond.rainChance) : UNKNOWN;
     const windNow = windText(format, cond.windNow);
@@ -454,14 +525,16 @@
     return [
       {
         key: 'rain',
-        label: 'Rain',
+        label: t('glanceEngine.metricRain', null, 'Rain'),
         value: rainValue,
         note: null,
-        hint: isNum(cond.rainChance) ? 'peak chance today' : 'not reported',
+        hint: isNum(cond.rainChance)
+          ? t('glanceEngine.hintPeakToday', null, 'peak chance today')
+          : t('glanceEngine.hintNotReported', null, 'not reported'),
       },
       {
         key: 'wind',
-        label: 'Wind',
+        label: t('glanceEngine.metricWind', null, 'Wind'),
         value: windNow || UNKNOWN,
         // The cardinal sits next to the number and reads on its own, so no
         // screen-reader hint is needed here.
@@ -470,12 +543,12 @@
       },
       {
         key: 'humidity',
-        label: 'Humidity',
+        label: t('glanceEngine.metricHumidity', null, 'Humidity'),
         value: current && isNum(current.relative_humidity_2m)
           ? format.percent(current.relative_humidity_2m)
           : UNKNOWN,
         note: null,
-        hint: 'relative humidity',
+        hint: t('glanceEngine.hintRelativeHumidity', null, 'relative humidity'),
       },
     ];
   }
@@ -494,6 +567,7 @@
    *     currentTime, // local "now" for the city, e.g. "2026-10-02T14:30"
    *     city,        // { name, admin1, country } - plain strings only
    *     format       // app.js formatters: { temp, tempSymbol, wind, ... }
+   *     t            // optional i18n.js translator: (key, vars, english)
    *   }
    *
    * Returns `ok: false` when there is nothing to show - including when the
@@ -504,6 +578,7 @@
     const source = ctx && typeof ctx === 'object' ? ctx : {};
 
     try {
+      const t = resolveT(source);
       const format = resolveFormat(source.format);
       const cond = readConditions(source, format);
       if (!cond.ok) return notEnoughData();
@@ -524,13 +599,13 @@
         tempSymbol: format.tempSymbol,
         feelsLike: isNum(cond.apparentC) ? tempText(format, cond.apparentC) : UNKNOWN,
         condition: format.conditionLabel(cond.code),
-        metrics: buildMetrics(cond, source.current),
+        metrics: buildMetrics(cond, source.current, t),
         verdict: {
           id: verdict.id,
           tone: verdict.tone,
           icon: verdict.icon,
-          text: verdict.text,
-          detail: verdictDetail(verdict.id, cond, currentHourOf(source)),
+          text: t(verdict.key, null, verdict.text),
+          detail: verdictDetail(verdict.id, cond, currentHourOf(source), t),
         },
       };
     } catch (err) {

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>WeatherScope - Climate & City Forecasts</title>
-  <meta name="description" content="Search real-time weather conditions by city name or discover cities worldwide meeting your preferred climate conditions." />
+  <meta name="description" content="Search real-time weather conditions by city name or discover cities worldwide meeting your preferred climate conditions." data-i18n-content="app.description" />
   <meta name="application-name" content="WeatherScope" />
   <meta name="theme-color" content="#0b1324" />
   <!-- The radar-scope mark: a weather radar seen through a scope ring -->
@@ -24,8 +24,8 @@
 
   <noscript>
     <div class="noscript-warning">
-      WeatherScope needs JavaScript enabled to fetch and display live meteorological data.
-      Please enable JavaScript in your browser and reload the page.
+      <span data-i18n="app.noscript">WeatherScope needs JavaScript enabled to fetch and display live meteorological data.</span>
+      <span data-i18n="app.noscriptHint">Please enable JavaScript in your browser and reload the page.</span>
     </div>
   </noscript>
 
@@ -70,17 +70,17 @@
             <path d="M18.4 18.5C18.4 19.6 19.65 20.9 19.65 21.8A1.25 1.25 0 0 1 17.15 21.8C17.15 20.9 18.4 19.6 18.4 18.5Z" fill="#7DD3FC" />
           </svg>
         </div>
-        <span class="brand-title">WeatherScope</span>
+        <span class="brand-title" data-i18n="app.name">WeatherScope</span>
       </div>
 
       <div class="search-section">
         <!-- Search Mode Switcher Tabs -->
-        <div class="search-mode-tabs" role="tablist" aria-label="Search mode selection">
+        <div class="search-mode-tabs" role="tablist" aria-label="Search mode selection" data-i18n-aria-label="nav.modeAria">
           <button type="button" class="mode-tab active" id="tab-mode-city" role="tab" aria-selected="true" aria-controls="main-content">
             <svg viewBox="0 0 20 20" fill="currentColor">
               <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 110 2h-3a1 1 0 01-1-1v-2a1 1 0 00-1-1H9a1 1 0 00-1 1v2a1 1 0 01-1 1H4a1 1 0 110-2V4zm3 1h2v2H7V5zm2 4H7v2h2V9zm2-4h2v2h-2V5zm2 4h-2v2h2V9z" clip-rule="evenodd" />
             </svg>
-            <span>City Search</span>
+            <span data-i18n="nav.citySearch">City Search</span>
           </button>
           <!-- Third mode: compare 2-4 picked places side by side. The search box
                above becomes "add a location" and the popular-city chips append
@@ -90,13 +90,13 @@
             <svg viewBox="0 0 20 20" fill="currentColor">
               <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h4a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm9 0a1 1 0 011-1h4a1 1 0 011 1v12a1 1 0 01-1 1h-4a1 1 0 01-1-1V4zM6 6v2h2V6H6zm0 4v2h2v-2H6zm6-4v2h2V6h-2zm0 4v2h2v-2h-2z" clip-rule="evenodd" />
             </svg>
-            <span>Compare</span>
+            <span data-i18n="nav.compare">Compare</span>
           </button>
           <button type="button" class="mode-tab" id="tab-mode-climate" role="tab" aria-selected="false" aria-controls="main-content">
             <svg viewBox="0 0 20 20" fill="currentColor">
               <path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd" />
             </svg>
-            <span>Climate Filter</span>
+            <span data-i18n="nav.climateFilter">Climate Filter</span>
           </button>
         </div>
 
@@ -110,9 +110,11 @@
               id="search-input"
               class="city-input"
               placeholder="Search for a city (e.g. Paris, Tokyo, New York)..."
+              data-i18n-placeholder="search.placeholderCity"
               required
               role="combobox"
               aria-label="Search for a city or climate condition"
+              data-i18n-aria-label="search.inputAria"
               aria-autocomplete="list"
               aria-haspopup="listbox"
               aria-controls="autocomplete-list"
@@ -120,14 +122,14 @@
               autocomplete="off"
               spellcheck="false"
             />
-            <button type="button" id="clear-btn" class="clear-btn hidden" aria-label="Clear input">
+            <button type="button" id="clear-btn" class="clear-btn hidden" aria-label="Clear input" data-i18n-aria-label="search.clearAria">
               <svg viewBox="0 0 20 20" fill="currentColor">
                 <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
               </svg>
             </button>
           </div>
-          <button type="submit" class="btn btn-search" id="search-submit-btn">Search</button>
-          <button type="button" id="geo-btn" class="btn btn-icon" title="Use current location" aria-label="Use current location">
+          <button type="submit" class="btn btn-search" id="search-submit-btn" data-i18n="search.submit">Search</button>
+          <button type="button" id="geo-btn" class="btn btn-icon" title="Use current location" data-i18n-title="geo.button" aria-label="Use current location" data-i18n-aria-label="geo.button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polygon points="3 11 22 2 13 21 11 13 3 11" />
             </svg>
@@ -135,7 +137,7 @@
         </form>
 
         <!-- Live suggestions dropdown -->
-        <div id="autocomplete-list" class="autocomplete-dropdown hidden" role="listbox" aria-label="Search suggestions"></div>
+        <div id="autocomplete-list" class="autocomplete-dropdown hidden" role="listbox" aria-label="Search suggestions" data-i18n-aria-label="search.suggestionsAria"></div>
       </div>
 
       <div class="header-controls">
@@ -153,12 +155,12 @@
           </span>
         </div>
 
-        <div class="unit-toggle" role="radiogroup" aria-label="Temperature unit selection">
+        <div class="unit-toggle" role="radiogroup" aria-label="Temperature unit selection" data-i18n-aria-label="nav.unitAria">
           <button type="button" class="unit-btn active" data-unit="celsius" id="unit-c" role="radio" aria-checked="true">°C</button>
           <button type="button" class="unit-btn" data-unit="fahrenheit" id="unit-f" role="radio" aria-checked="false">°F</button>
         </div>
 
-        <div class="lang-toggle" role="radiogroup" aria-label="Language selection">
+        <div class="lang-toggle" role="radiogroup" aria-label="Language selection" data-i18n-aria-label="nav.languageAria">
           <button type="button" class="lang-btn active" data-lang="en" id="lang-en" role="radio" aria-checked="true">EN</button>
           <button type="button" class="lang-btn" data-lang="el" id="lang-el" role="radio" aria-checked="false">EL</button>
           <button type="button" class="lang-btn" data-lang="de" id="lang-de" role="radio" aria-checked="false">DE</button>
@@ -177,35 +179,35 @@
          Numeric thresholds are unit-aware: app.js rewrites .chip-threshold text
          whenever the degC/degF toggle changes. -->
     <div class="climate-filter-chips hidden" id="climate-chips-container">
-      <span class="quick-label" id="climate-chips-label">Preset Climates:</span>
+      <span class="quick-label" id="climate-chips-label" data-i18n="climate.presetClimates">Preset Climates:</span>
       <div class="quick-chips" id="climate-chips" role="group" aria-labelledby="climate-chips-label">
         <!-- Row 1: sky conditions -->
-        <button type="button" class="chip climate-filter-chip" data-condition="sunny" aria-pressed="false">☀️ Sunny</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="cloudy" aria-pressed="false">⛅ Cloudy</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="rain" aria-pressed="false">🌧️ Rainy</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="snow" aria-pressed="false">❄️ Snowy</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="thunderstorm" aria-pressed="false">⚡ Storm</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="sunny" aria-pressed="false">☀️ <span data-i18n="climate.sunny">Sunny</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="cloudy" aria-pressed="false">⛅ <span data-i18n="climate.cloudy">Cloudy</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="rain" aria-pressed="false">🌧️ <span data-i18n="climate.rainy">Rainy</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="snow" aria-pressed="false">❄️ <span data-i18n="climate.snowy">Snowy</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="thunderstorm" aria-pressed="false">⚡ <span data-i18n="climate.storm">Storm</span></button>
 
         <!-- Row 2: temperature bands, ascending -->
-        <button type="button" class="chip climate-filter-chip" data-condition="freezing" data-temp-max="2" aria-pressed="false">🧊 Freezing</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="cold" data-temp-max="12" aria-pressed="false">🥶 Cold</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="cool" data-temp-min="8" data-temp-max="14" aria-pressed="false">🧥 Cool</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="mild" data-temp-min="14" data-temp-max="20" aria-pressed="false">🧣 Mild</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="warm" data-temp-min="20" data-temp-max="28" aria-pressed="false">🏖️ Warm</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="freezing" data-temp-max="2" aria-pressed="false">🧊 <span data-i18n="climate.freezing">Freezing</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="cold" data-temp-max="12" aria-pressed="false">🥶 <span data-i18n="climate.cold">Cold</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="cool" data-temp-min="8" data-temp-max="14" aria-pressed="false">🧥 <span data-i18n="climate.cool">Cool</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="mild" data-temp-min="14" data-temp-max="20" aria-pressed="false">🧣 <span data-i18n="climate.mild">Mild</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="warm" data-temp-min="20" data-temp-max="28" aria-pressed="false">🏖️ <span data-i18n="climate.warm">Warm</span></button>
 
         <!-- Row 3: heat, humidity and wind -->
-        <button type="button" class="chip climate-filter-chip" data-condition="hot" data-temp-min="28" aria-pressed="false">🌴 Hot</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="humid" data-humidity-min="70" aria-pressed="false">💧 Humid</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="dry" data-humidity-max="30" aria-pressed="false">🏜️ Dry</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="windy" data-wind="20" aria-pressed="false">💨 Windy</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="gale" data-wind="40" aria-pressed="false">🌪️ Gale</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="hot" data-temp-min="28" aria-pressed="false">🌴 <span data-i18n="climate.hot">Hot</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="humid" data-humidity-min="70" aria-pressed="false">💧 <span data-i18n="climate.humid">Humid</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="dry" data-humidity-max="30" aria-pressed="false">🏜️ <span data-i18n="climate.dry">Dry</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="windy" data-wind="20" aria-pressed="false">💨 <span data-i18n="climate.windy">Windy</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="gale" data-wind="40" aria-pressed="false">🌪️ <span data-i18n="climate.gale">Gale</span></button>
 
         <!-- Row 4: curated combinations (expanded by CLIMATE_PRESET_EXPANSIONS) -->
-        <button type="button" class="chip climate-filter-chip" data-condition="beach" aria-pressed="false">🏝️ Beach Day</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="ski" aria-pressed="false">🎿 Ski Trip</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="tropical" aria-pressed="false">🌴 Tropical</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="breeze" aria-pressed="false">🍃 Mild &amp; Breezy</button>
-        <button type="button" class="chip climate-filter-chip" data-condition="showers" aria-pressed="false">🌈 Rainy &amp; Mild</button>
+        <button type="button" class="chip climate-filter-chip" data-condition="beach" aria-pressed="false">🏝️ <span data-i18n="climate.beachDay">Beach Day</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="ski" aria-pressed="false">🎿 <span data-i18n="climate.skiTrip">Ski Trip</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="tropical" aria-pressed="false">🌴 <span data-i18n="climate.tropical">Tropical</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="breeze" aria-pressed="false">🍃 <span data-i18n="climate.mildBreezy">Mild &amp; Breezy</span></button>
+        <button type="button" class="chip climate-filter-chip" data-condition="showers" aria-pressed="false">🌈 <span data-i18n="climate.rainyMild">Rainy &amp; Mild</span></button>
       </div>
     </div>
 
@@ -226,9 +228,9 @@
             <line x1="12" y1="16" x2="12.01" y2="16" />
           </svg>
         </div>
-        <h3 id="error-title">No Matching Results</h3>
-        <p id="error-message">We couldn't retrieve results for your query. Please adjust your criteria and try again.</p>
-        <button class="btn btn-secondary" id="retry-btn">Try Another Search</button>
+        <h3 id="error-title" data-i18n="state.errorTitle">No Matching Results</h3>
+        <p id="error-message" data-i18n="state.errorBody">We couldn't retrieve results for your query. Please adjust your criteria and try again.</p>
+        <button class="btn btn-secondary" id="retry-btn" data-i18n="state.retry">Try Another Search</button>
       </div>
 
       <!-- Back to Climate Results Bar (Appears when viewing a city from climate search) -->
@@ -248,11 +250,11 @@
       <div id="shared-banner" class="shared-banner" role="status" aria-live="polite" hidden>
         <span class="shared-banner-icon" aria-hidden="true">🔗</span>
         <p class="shared-banner-text">
-          <span class="shared-banner-label">Shared forecast</span>
+          <span class="shared-banner-label" data-i18n="share.forecast">Shared forecast</span>
           <span class="shared-banner-city" id="shared-banner-city"></span>
           <span class="shared-banner-cards" id="shared-banner-cards"></span>
         </p>
-        <button type="button" class="btn btn-secondary shared-clear-btn" id="shared-clear-btn">
+        <button type="button" class="btn btn-secondary shared-clear-btn" id="shared-clear-btn" data-i18n="share.showAllCards">
           Show all cards
         </button>
       </div>
@@ -267,7 +269,7 @@
         <div class="climate-results-header">
           <div>
             <div class="climate-title-row">
-              <h2 class="card-section-title" id="climate-results-title">Cities matching climate conditions</h2>
+              <h2 class="card-section-title" id="climate-results-title" data-i18n="climate.resultsTitle">Cities matching climate conditions</h2>
               <span class="count-badge" id="climate-results-count">0 found</span>
             </div>
             <p class="card-subtitle" id="climate-results-subtitle">Click on any city card to explore its detailed real-time weather and 7-day outlook.</p>
@@ -276,21 +278,21 @@
           <div class="climate-results-controls">
             <div class="climate-active-tags" id="climate-active-tags"></div>
             <div class="climate-sort-wrapper">
-              <label for="climate-sort-select" class="sort-label">Sort:</label>
+              <label for="climate-sort-select" class="sort-label" data-i18n="climate.sortLabel">Sort:</label>
               <!-- Options are rebuilt from the active climate filter on every render:
                    each measurement the filter constrains (temperature, humidity, wind)
                    is offered higher-to-lower and lower-to-higher, and city name is
                    always available. This single option is the pre-render baseline;
                    it is always present in the generated list too. -->
               <select id="climate-sort-select" class="climate-select">
-                <option value="name-asc">City name (A-Z)</option>
+                <option value="name-asc" data-i18n="climate.sortNameAsc">City name (A-Z)</option>
               </select>
             </div>
           </div>
         </div>
 
         <!-- City Results Grid -->
-        <div class="climate-results-grid" id="climate-results-grid" aria-label="Matching cities">
+        <div class="climate-results-grid" id="climate-results-grid" aria-label="Matching cities" data-i18n-aria-label="climate.resultsAria">
           <!-- Injected via JavaScript -->
         </div>
       </section>
@@ -303,10 +305,10 @@
         <!-- 1. Location selection -->
         <div class="card compare-locations-card">
           <div class="compare-title-row">
-            <h2 class="card-section-title" id="compare-heading">Compare Locations</h2>
+            <h2 class="card-section-title" id="compare-heading" data-i18n="compare.heading">Compare Locations</h2>
             <span class="count-badge" id="compare-count">0 of 4 selected</span>
           </div>
-          <p class="card-subtitle" id="compare-subtitle">
+          <p class="card-subtitle" id="compare-subtitle" data-i18n="compare.subtitle">
             Search above or tap a popular city to build a list, then compare 2 to 4 places.
           </p>
 
@@ -318,10 +320,10 @@
               <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                 <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
               </svg>
-              <span>Add location</span>
+              <span data-i18n="compare.addLocation">Add location</span>
             </button>
-            <button type="button" class="btn btn-search compare-action-btn" id="compare-run-btn">Compare</button>
-            <button type="button" class="btn btn-secondary compare-action-btn" id="compare-clear-btn">Clear all</button>
+            <button type="button" class="btn btn-search compare-action-btn" id="compare-run-btn" data-i18n="compare.run">Compare</button>
+            <button type="button" class="btn btn-secondary compare-action-btn" id="compare-clear-btn" data-i18n="compare.clearAll">Clear all</button>
           </div>
 
           <!-- Duplicate / capacity / selection feedback, announced politely -->
@@ -339,15 +341,15 @@
              before the first number is read. -->
         <section class="card compare-glance-card hidden" id="compare-glance-card" aria-labelledby="compare-glance-heading">
           <div class="compare-title-row">
-            <h2 class="card-section-title" id="compare-glance-heading">Weather at a glance</h2>
+            <h2 class="card-section-title" id="compare-glance-heading" data-i18n="compare.glanceHeading">Weather at a glance</h2>
             <ul class="compare-legend" role="list">
               <li class="compare-legend-item" data-emphasis="high">
                 <span class="compare-legend-swatch" aria-hidden="true"></span>
-                <span>Highest in the row</span>
+                <span data-i18n="compare.legendHigh">Highest in the row</span>
               </li>
               <li class="compare-legend-item" data-emphasis="low">
                 <span class="compare-legend-swatch" aria-hidden="true"></span>
-                <span>Lowest in the row</span>
+                <span data-i18n="compare.legendLow">Lowest in the row</span>
               </li>
             </ul>
           </div>
@@ -360,7 +362,7 @@
              the result concisely. -->
         <section class="card compare-table-card hidden" id="compare-current-card" aria-labelledby="compare-current-heading">
           <div class="card-header-row">
-            <h2 class="card-section-title" id="compare-current-heading">Current conditions</h2>
+            <h2 class="card-section-title" id="compare-current-heading" data-i18n="compare.currentHeading">Current conditions</h2>
             <span class="card-subtitle" id="compare-freshness"></span>
           </div>
           <div class="compare-table-wrap" tabindex="0" role="region" aria-labelledby="compare-current-heading" aria-live="off">
@@ -371,8 +373,8 @@
         <!-- 5. Today's forecast comparison -->
         <section class="card compare-table-card hidden" id="compare-forecast-card" aria-labelledby="compare-forecast-heading">
           <div class="card-header-row">
-            <h2 class="card-section-title" id="compare-forecast-heading">Today&rsquo;s forecast comparison</h2>
-            <span class="card-subtitle">Highest, lowest, rain chance &amp; peak values</span>
+            <h2 class="card-section-title" id="compare-forecast-heading" data-i18n="compare.forecastHeading">Today&rsquo;s forecast comparison</h2>
+            <span class="card-subtitle" data-i18n="compare.forecastSubtitle">Highest, lowest, rain chance &amp; peak values</span>
           </div>
           <div class="compare-table-wrap" tabindex="0" role="region" aria-labelledby="compare-forecast-heading" aria-live="off">
             <table class="compare-table" id="compare-forecast-table"></table>
@@ -390,7 +392,7 @@
              refresh never flashes yesterday's answer. -->
         <section class="card glance-card" id="glance-card" aria-labelledby="glance-heading" hidden>
           <div class="glance-head">
-            <h2 class="card-section-title" id="glance-heading">Today at a glance</h2>
+            <h2 class="card-section-title" id="glance-heading" data-i18n="glance.heading">Today at a glance</h2>
             <p class="glance-location">
               <span class="glance-pin" aria-hidden="true">📍</span>
               <span class="glance-location-name" id="glance-location">--</span>
@@ -403,7 +405,7 @@
               <p class="glance-temp-main">
                 <span class="glance-temp-value" id="glance-temp">--</span><span class="glance-temp-symbol" id="glance-temp-symbol">°C</span>
               </p>
-              <p class="glance-feels-like">Feels like <span id="glance-feels-like">--</span></p>
+              <p class="glance-feels-like"><span data-i18n="glance.feelsLike">Feels like</span> <span id="glance-feels-like">--</span></p>
             </div>
 
             <div class="glance-condition">
@@ -420,7 +422,7 @@
           <div class="glance-verdict" id="glance-verdict" data-tone="unknown" role="status" aria-live="polite">
             <span class="glance-verdict-icon" id="glance-verdict-icon" aria-hidden="true"></span>
             <p class="glance-verdict-text">
-              <span class="glance-verdict-label" id="glance-verdict-label">Today&rsquo;s verdict:</span>
+              <span class="glance-verdict-label" id="glance-verdict-label" data-i18n="glance.verdictLabel">Today&rsquo;s verdict:</span>
               <strong class="glance-verdict-headline" id="glance-verdict-headline">--</strong>
               <span class="glance-verdict-detail" id="glance-verdict-detail"></span>
             </p>
@@ -434,7 +436,7 @@
           <div class="glance-wear" id="glance-wear" data-tone="unknown" role="status" aria-live="polite" hidden>
             <span class="glance-wear-icon" id="glance-wear-icon" aria-hidden="true"></span>
             <p class="glance-wear-text">
-              <span class="glance-wear-label">What to wear:</span>
+              <span class="glance-wear-label" data-i18n="glance.whatToWear">What to wear:</span>
               <strong class="glance-wear-headline" id="glance-wear-headline">--</strong>
               <span class="glance-wear-detail" id="glance-wear-detail"></span>
             </p>
@@ -461,7 +463,7 @@
                 </div>
                 <div class="local-time-meta">
                   <span class="local-time-date" id="local-time-date">Saturday, Sep 26</span>
-                  <span class="local-time-diff" id="city-time-diff">Same time as you</span>
+              <span class="local-time-diff" id="city-time-diff" data-i18n="time.sameAsYou">Same time as you</span>
                 </div>
               </div>
 
@@ -472,7 +474,7 @@
               <span id="condition-text">Mainly Clear</span>
             </div>
             <div class="hero-actions">
-              <button type="button" class="btn btn-icon share-btn" id="share-btn" title="Share weather" aria-label="Share weather">
+              <button type="button" class="btn btn-icon share-btn" id="share-btn" title="Share weather" data-i18n-title="share.button" aria-label="Share weather" data-i18n-aria-label="share.button">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <circle cx="18" cy="5" r="3" />
                   <circle cx="6" cy="12" r="3" />
@@ -481,7 +483,7 @@
                   <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
                 </svg>
               </button>
-              <button type="button" class="btn btn-icon refresh-btn" id="refresh-btn" title="Refresh weather data" aria-label="Refresh weather data">
+              <button type="button" class="btn btn-icon refresh-btn" id="refresh-btn" title="Refresh weather data" data-i18n-title="hero.refreshAria" aria-label="Refresh weather data" data-i18n-aria-label="hero.refreshAria">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M21 12a9 9 0 1 1-2.64-6.36" />
                   <polyline points="21 3 21 9 15 9" />
@@ -498,7 +500,7 @@
               </div>
               <div class="temp-meta">
                 <div class="feels-like">
-                  Feels like <span id="feels-like-temp">23°C</span>
+                  <span data-i18n="hero.feelsLike">Feels like</span> <span id="feels-like-temp">23°C</span>
                 </div>
                 <div class="day-range">
                   <span class="range-item">
@@ -524,7 +526,7 @@
         <!-- Personal Weather Assistant -->
         <section class="card assistant-card" id="assistant-card" aria-labelledby="assistant-heading" hidden>
           <div class="assistant-header">
-            <h2 class="card-section-title" id="assistant-heading">Today's advice</h2>
+            <h2 class="card-section-title" id="assistant-heading" data-i18n="assistant.heading">Today's advice</h2>
             <p class="card-subtitle assistant-scope" id="assistant-scope">Based on the hourly forecast</p>
           </div>
 
@@ -543,7 +545,7 @@
           <!-- "Rain during your ...?" time-window selector -->
           <div class="assistant-window">
             <div class="assistant-window-head">
-              <h3 class="assistant-window-title" id="assistant-window-title">Rain during your&hellip;?</h3>
+              <h3 class="assistant-window-title" id="assistant-window-title" data-i18n="assistant.windowTitle">Rain during your&hellip;?</h3>
               <div class="assistant-window-tabs" id="assistant-window-tabs" role="radiogroup" aria-labelledby="assistant-window-title"></div>
             </div>
             <p class="assistant-window-answer" id="assistant-window-answer" role="status" aria-live="polite"></p>
@@ -552,8 +554,8 @@
 
         <!-- Condition Metrics Grid. The id is what a shared deep link points at
              when the sender was looking at this card, so it must stay stable. -->
-        <section class="card metrics-card" id="metrics-card" aria-label="Key Weather Metrics">
-          <h2 class="card-section-title">Current Conditions</h2>
+        <section class="card metrics-card" id="metrics-card" aria-label="Key Weather Metrics" data-i18n-aria-label="metrics.aria">
+          <h2 class="card-section-title" data-i18n="metrics.heading">Current Conditions</h2>
           <div class="metrics-grid">
             <!-- Humidity -->
             <div class="metric-box">
@@ -563,7 +565,7 @@
                     <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
                   </svg>
                 </div>
-                <span class="metric-title">Humidity</span>
+                <span class="metric-title" data-i18n="metrics.humidity">Humidity</span>
               </div>
               <div class="metric-value-row">
                 <span class="metric-value" id="humidity-val">57</span>
@@ -580,7 +582,7 @@
                     <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2"/>
                   </svg>
                 </div>
-                <span class="metric-title">Wind</span>
+                <span class="metric-title" data-i18n="metrics.wind">Wind</span>
               </div>
               <div class="metric-value-row">
                 <span class="metric-value" id="wind-speed-val">4.2</span>
@@ -610,7 +612,7 @@
                     <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
                   </svg>
                 </div>
-                <span class="metric-title">UV Index</span>
+                <span class="metric-title" data-i18n="metrics.uvIndex">UV Index</span>
               </div>
               <div class="metric-value-row">
                 <span class="metric-value" id="uv-val">2.9</span>
@@ -628,7 +630,7 @@
                     <polyline points="12 7 12 12 15 15" />
                   </svg>
                 </div>
-                <span class="metric-title">Pressure</span>
+                <span class="metric-title" data-i18n="metrics.pressure">Pressure</span>
               </div>
               <div class="metric-value-row">
                 <span class="metric-value" id="pressure-val">1021</span>
@@ -648,7 +650,7 @@
                     <path d="M12 16v6" />
                   </svg>
                 </div>
-                <span class="metric-title">Precipitation</span>
+                <span class="metric-title" data-i18n="metrics.precipitation">Precipitation</span>
               </div>
               <div class="metric-value-row">
                 <span class="metric-value" id="precip-val">0.0</span>
@@ -666,7 +668,7 @@
                     <polyline points="12 7 12 12 15.5 14" />
                   </svg>
                 </div>
-                <span class="metric-title">Local Time</span>
+                <span class="metric-title" data-i18n="metrics.localTime">Local Time</span>
               </div>
               <div class="metric-value-row">
                 <span class="metric-value clock-metric-value" id="metric-city-clock">--:--:--</span>
@@ -692,16 +694,16 @@
                     <line x1="23" y1="22" x2="1" y2="22" />
                   </svg>
                 </div>
-                <span class="metric-title">Sunrise &amp; Sunset</span>
+                <span class="metric-title" data-i18n="metrics.sunriseSunset">Sunrise &amp; Sunset</span>
               </div>
               <div class="sun-times-row">
                 <div class="sun-time-item">
-                  <span class="sun-label">Sunrise</span>
+                  <span class="sun-label" data-i18n="metrics.sunrise">Sunrise</span>
                   <span class="sun-time" id="sunrise-val">07:44</span>
                 </div>
                 <div class="sun-divider"></div>
                 <div class="sun-time-item">
-                  <span class="sun-label">Sunset</span>
+                  <span class="sun-label" data-i18n="metrics.sunset">Sunset</span>
                   <span class="sun-time" id="sunset-val">19:37</span>
                 </div>
               </div>
@@ -712,10 +714,10 @@
         <!-- Hourly Forecast Strip -->
         <section class="card hourly-card" id="hourly-card">
           <div class="card-header-row">
-            <h2 class="card-section-title">24-Hour Forecast</h2>
-            <span class="card-subtitle">Local hourly projection &middot; <span class="tz-label" id="hourly-tz-label">city time</span></span>
+            <h2 class="card-section-title" data-i18n="forecast.hourlyHeading">24-Hour Forecast</h2>
+            <span class="card-subtitle"><span data-i18n="forecast.hourlySubtitle">Local hourly projection &middot;</span> <span class="tz-label" id="hourly-tz-label">city time</span></span>
           </div>
-          <div class="hourly-strip" id="hourly-strip" role="region" aria-label="Hourly weather forecast">
+          <div class="hourly-strip" id="hourly-strip" role="region" aria-label="Hourly weather forecast" data-i18n-aria-label="forecast.hourlyAria">
             <!-- Hourly cards injected via JavaScript -->
           </div>
         </section>
@@ -723,8 +725,8 @@
         <!-- 7-Day Extended Forecast -->
         <section class="card daily-card" id="daily-card">
           <div class="card-header-row">
-            <h2 class="card-section-title">7-Day Forecast</h2>
-            <span class="card-subtitle">Upcoming outlook &middot; <span class="tz-label" id="daily-tz-label">city time</span></span>
+            <h2 class="card-section-title" data-i18n="forecast.dailyHeading">7-Day Forecast</h2>
+            <span class="card-subtitle"><span data-i18n="forecast.dailySubtitle">Upcoming outlook &middot;</span> <span class="tz-label" id="daily-tz-label">city time</span></span>
           </div>
           <div class="daily-list" id="daily-list" role="list">
             <!-- Daily rows injected via JavaScript -->
@@ -737,7 +739,7 @@
          Lives at the foot of the page, below every card, so it reads as the
          "somewhere else?" shortcut rather than competing with the header. -->
     <div class="quick-cities" id="quick-cities-container">
-      <span class="quick-label" id="quick-cities-label">Popular:</span>
+      <span class="quick-label" id="quick-cities-label" data-i18n="popular.label">Popular:</span>
       <div class="quick-chips" id="quick-chips" role="group" aria-labelledby="quick-cities-label">
         <button type="button" class="chip" data-city="Athens">Athens</button>
         <button type="button" class="chip" data-city="Barcelona">Barcelona</button>
@@ -764,8 +766,8 @@
 
     <!-- Footer -->
     <footer class="app-footer">
-      <p>Data provided by <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo API</a> &bull; Real-time global meteorological intelligence</p>
-      <p class="footer-timezone-note">Local times use each city's IANA timezone and tick in real time &middot; Your reference time is detected from your device timezone (<span id="footer-user-zone">--</span>)</p>
+      <p>Data provided by <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo API</a> &bull; <span id="footer-tagline" data-i18n="footer.tagline">Real-time global meteorological intelligence</span></p>
+      <p class="footer-timezone-note" id="footer-timezone-note">Local times use each city's IANA timezone and tick in real time &middot; Your reference time is detected from your device timezone (<span id="footer-user-zone">--</span>)</p>
     </footer>
   </div>
 

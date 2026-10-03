@@ -118,7 +118,7 @@ test('the markup ships the accessibility scaffolding the renderer relies on', ()
   const section = html.slice(html.indexOf('id="glance-card"'), html.indexOf('id="hero-card"'));
 
   assert.match(section, /aria-labelledby="glance-heading"/, 'the card needs an accessible name');
-  assert.match(section, /id="glance-heading">Today at a glance</, 'the visible heading must match');
+  assert.match(section, /id="glance-heading"[^>]*>Today at a glance</, 'the visible heading must match');
   assert.match(section, /role="status"/, 'the verdict is the card\'s answer and must be announced');
   assert.match(section, /aria-live="polite"/);
   assert.match(section, /id="glance-metrics" role="list"/, 'the metrics need a list role');
