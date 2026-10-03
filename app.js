@@ -671,6 +671,7 @@
 
     // Freshness + refresh
     dataFreshness: document.getElementById('data-freshness'),
+    shareBtn: document.getElementById('share-btn'),
     refreshBtn: document.getElementById('refresh-btn'),
 
     // Live clocks
@@ -1646,6 +1647,38 @@
    * the other. Each row is label + value (+ dimmed note) with a spoken-only
    * hint, so "Rain 65%" is read as "Rain 65% peak chance today".
    */
+  
+  function generateShareText(data, city) {
+    if (!data || !city) return '';
+    const current = data.current;
+    const daily = data.daily;
+    const cityName = city.name;
+    const temp = formatTemp(current.temperature_2m);
+    const unit = getTempUnitSymbol();
+    const rain = current.precipitation_probability ?? (data.hourly && data.hourly.precipitation_probability && data.hourly.precipitation_probability[0]) ?? 0;
+    const maxTemp = daily && daily.temperature_2m_max && daily.temperature_2m_max.length > 0 ? formatTemp(daily.temperature_2m_max[0]) : temp;
+    const minTemp = daily && daily.temperature_2m_min && daily.temperature_2m_min.length > 0 ? formatTemp(daily.temperature_2m_min[0]) : temp;
+    const rainChance = Math.round(rain);
+    return "Weather in " + cityName + "\n" + temp + unit + "\n" + rainChance + "% rain\nHigh " + maxTemp + unit + "\nLow " + minTemp + unit;
+  }
+
+  function shareWeather() {
+    if (!state.weatherData || !state.currentCity) return;
+    const text = generateShareText(state.weatherData, state.currentCity);
+    const shareData = {
+      title: "Weather in " + state.currentCity.name,
+      text: text,
+      url: window.location.href
+    };
+    if (navigator.share) {
+      navigator.share(shareData).catch(function(){})
+    } else {
+      try {
+        navigator.clipboard.writeText(text).catch(function(){})
+      } catch (e) {}
+    }
+  }
+
   function renderGlanceMetrics(metrics) {
     const container = elements.glanceMetrics;
     if (!container) return;
@@ -4119,6 +4152,11 @@ const icon = document.createElement('span');
           elements.refreshBtn.classList.remove('is-loading');
           elements.refreshBtn.disabled = false;
         });
+      });
+    }
+    if (elements.shareBtn) {
+      elements.shareBtn.addEventListener('click', function() {
+        shareWeather();
       });
     }
 
