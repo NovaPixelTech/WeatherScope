@@ -1819,14 +1819,16 @@
    */
   function detectLanguage() {
     const query = langFromQuery();
-    if (query) return Promise.resolve({ lang: query, source: 'query', ip: null, city: null, country: null });
-
     const stored = readStorage();
-    if (stored) return Promise.resolve({ lang: stored, source: 'stored', ip: null, city: null, country: null });
-
+    const preferred = query || stored;
+    const preferredSource = query ? 'query' : 'stored';
     return raceIpLanguage()
-      .then((info) => ({ ...info, source: 'ip' }))
-      .catch(() => fallbackLang());
+      .then((info) => preferred
+        ? { ...info, lang: preferred, source: preferredSource }
+        : { ...info, source: 'ip' })
+      .catch(() => preferred
+        ? { lang: preferred, source: preferredSource, ip: null, city: null, country: null }
+        : fallbackLang());
   }
 
   /**

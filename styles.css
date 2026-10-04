@@ -1257,6 +1257,8 @@ body {
 /* --- Header: the visitor's own clock ----------------------------------- */
 .user-clock,
 .user-location {
+  min-width: 190px;
+  max-width: min(360px, 30vw);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1277,6 +1279,7 @@ body {
 .user-location-body {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   line-height: 1.15;
 }
 
@@ -1285,6 +1288,7 @@ body {
   font-weight: 800;
   color: #ffffff;
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  white-space: nowrap;
 }
 
 .user-location-place {
@@ -1296,7 +1300,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 18ch;
+  max-width: 40ch;
 }
 
 .user-clock-icon {
@@ -3328,7 +3332,7 @@ body {
 
   .user-clock-zone,
   .user-location-place {
-    max-width: 10ch;
+    max-width: 32ch;
   }
 }
 
@@ -3360,7 +3364,11 @@ body {
 
   .user-clock-zone,
   .user-location-place {
-    max-width: 12ch;
+    max-width: 32ch;
+  }
+
+  .user-location {
+    max-width: 52vw;
   }
 
   /* Keep the hero clock on one line and shrink the digits rather than wrap. */

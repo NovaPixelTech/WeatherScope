@@ -4839,7 +4839,11 @@ const icon = document.createElement('span');
     } catch (err) {
       return;
     }
-    if (!detected || !detected.lang) return;
+    if (!detected) return;
+
+    // Show the visitor's IP location even when their language is already saved.
+    updateUserLocationDisplay(detected);
+    if (!detected.lang) return;
 
     // `init()` has already honoured an explicit query or stored preference.
     // Detection is only allowed to paint a first-time visitor and never writes
@@ -4848,8 +4852,6 @@ const icon = document.createElement('span');
     if (languagePicked) return;
     window.I18n.setLanguage(detected.lang, { persist: false });
 
-    // Update the user location display with the geo info
-    updateUserLocationDisplay(detected);
   }
 
   function updateUserLocationDisplay(geoInfo) {
