@@ -1666,7 +1666,7 @@
   // lookup is bounded by GEO_TIMEOUT and a failure simply falls through to the
   // browser's own language preference.
   // ==========================================================================
-  const GEO_TIMEOUT = 2500;
+  const GEO_TIMEOUT = 5000;
 
   const GEO_ENDPOINTS = [
     {
@@ -1690,14 +1690,24 @@
         return data ? data.country : null;
       },
     },
+    {
+      url: 'https://ipapi.co/json/',
+      parse: (body) => {
+        const data = JSON.parse(body);
+        return data ? data.country_code : null;
+      },
+    },
   ];
 
   function fetchCountry(endpoint) {
-    if (typeof fetch !== 'function') return Promise.reject(new Error('fetch unavailable'));
+    const fetchImpl = win && typeof win.fetch === 'function'
+      ? win.fetch.bind(win)
+      : (typeof fetch === 'function' ? fetch : null);
+    if (!fetchImpl) return Promise.reject(new Error('fetch unavailable'));
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), GEO_TIMEOUT) : null;
 
-    return fetch(endpoint.url, {
+    return fetchImpl(endpoint.url, {
       method: 'GET',
       mode: 'cors',
       credentials: 'omit',
@@ -1736,8 +1746,14 @@
     if (stored) return Promise.resolve({ lang: stored, source: 'stored' });
 
     const attempts = GEO_ENDPOINTS.map(fetchCountry);
+    // Reject malformed/unusable responses before racing the endpoints. A valid
+    // country outside the Greek/German map intentionally resolves to English.
+    const supportedAttempts = attempts.map((attempt) => attempt.then((lang) => {
+      if (!lang) throw new Error('geo language unavailable');
+      return lang;
+    }));
     const fromNetwork = typeof Promise.any === 'function'
-      ? Promise.any(attempts)
+      ? Promise.any(supportedAttempts)
       : Promise.allSettled(attempts).then(
         (results) => results.find((r) => r.status === 'fulfilled' && !!r.value) || Promise.reject(new Error('geo unavailable'))
       );

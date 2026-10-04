@@ -564,7 +564,10 @@
   }
 
   /** The graceful state required when the readings a getter needs are absent. */
-  function notEnoughData(meta, reason) {
+  function notEnoughData(meta, reason, profile) {
+    const translator = profile && typeof profile.t === 'function' ? profile.t : null;
+    const fallbackTitle = 'Not enough forecast data';
+    const fallbackDetail = reason || 'This recommendation needs hourly forecast data that is not available right now.';
     return {
       ok: false,
       id: meta.id,
@@ -572,8 +575,8 @@
       label: meta.label,
       verdict: 'unknown',
       tone: 'unknown',
-      headline: 'Not enough forecast data',
-      detail: reason || 'This recommendation needs hourly forecast data that is not available right now.',
+      headline: translator ? translator('adviceEngine.notEnoughTitle', null, fallbackTitle) : fallbackTitle,
+      detail: translator ? translator('adviceEngine.notEnoughDetail', null, fallbackDetail) : fallbackDetail,
       window: null,
     };
   }
@@ -583,9 +586,9 @@
   // ==========================================================================
   function getUmbrellaAdvice(profile) {
     const meta = ADVICE_META.umbrella;
-    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly forecast is available.');
+    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly forecast is available.', profile);
     if (!profile.rainAvailable) {
-      return notEnoughData(meta, 'This city has no precipitation probability or amount in the forecast.');
+      return notEnoughData(meta, 'This city has no precipitation probability or amount in the forecast.', profile);
     }
 
     const T = THRESHOLDS.rain;
@@ -615,13 +618,13 @@
     const soakedAllDay = isNum(totalMm) && totalMm >= T.washBlockingMm;
 
     if ((peakChance !== null && peakChance >= T.umbrellaCertainChance) || soakedAllDay || soakingRain) {
-      return result(meta, 'definitely', 'bad', 'Definitely bring an umbrella', why, {
+      return result(meta, 'definitely', 'bad', tr(profile, 'adviceEngine.umbrellaDefinitely', null, 'Definitely bring an umbrella'), why, {
         window: wetRun ? rangeLabel(wetRun.startHour, wetRun.endHour) : null,
       });
     }
 
     if ((peakChance !== null && peakChance >= T.umbrellaChance) || measurableRain) {
-      return result(meta, 'likely', 'warn', 'Bring an umbrella', why, {
+      return result(meta, 'likely', 'warn', tr(profile, 'adviceEngine.umbrellaLikely', null, 'Bring an umbrella'), why, {
         window: wetRun ? rangeLabel(wetRun.startHour, wetRun.endHour) : null,
       });
     }
@@ -630,7 +633,7 @@
       ? `No measurable precipitation is forecast for ${profile.scopePhrase}.`
       : `Rain probability stays low (peaks at ${Math.round(peakChance)}%).`;
 
-    return result(meta, 'unlikely', 'good', 'Probably not', peakText);
+    return result(meta, 'unlikely', 'good', tr(profile, 'adviceEngine.umbrellaUnlikely', null, 'Probably not'), peakText);
   }
 
   // ==========================================================================
@@ -708,11 +711,11 @@
 
   function getBestWalkWindow(profile) {
     const meta = ADVICE_META.walk;
-    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly temperatures are available.');
+    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly temperatures are available.', profile);
 
     const candidates = profile.list.filter((hour) => isNum(hour.comfortTempC));
     if (candidates.length < THRESHOLDS.walk.minWindowHours) {
-      return notEnoughData(meta, 'Not enough hourly temperatures to compare a stretch of the day.');
+      return notEnoughData(meta, 'Not enough hourly temperatures to compare a stretch of the day.', profile);
     }
 
     const format = profile.format;
@@ -733,7 +736,7 @@
       const windValue = windText(format, maxWind);
       parts.push(`${windDescriptor(maxWind)}${windValue ? ` (up to ${windValue})` : ''}`);
     }
-    if (!parts.length) parts.push('Limited detail for this period');
+    if (!parts.length) parts.push(tr(profile, 'adviceEngine.walkLimited', null, 'Limited detail for this period'));
 
     const ideal = isIdealWalkWindow(best.window);
 
@@ -746,12 +749,15 @@
       }
       if (isNum(maxWind) && maxWind > THRESHOLDS.walk.idealWindKmh) reasons.push('it is windy');
 
-      return result(meta, 'none', 'warn', 'No ideal period today', `The driest window is ${label}. ${capitalize(parts.join(', '))}${reasons.length ? `, but ${reasons.join(' and ')}.` : '.'}`, {
+      const detail = reasons.length
+        ? tr(profile, 'adviceEngine.walkBut', { detail: capitalize(parts.join(', ')), reasons: reasons.join(' and ') }, `${capitalize(parts.join(', '))}, but ${reasons.join(' and ')}.`)
+        : '';
+      return result(meta, 'none', 'warn', tr(profile, 'adviceEngine.walkNone', null, 'No ideal period today'), `${tr(profile, 'adviceEngine.walkBest', { window: label, reasons: detail }, `The driest window is ${label}. ${detail}`)}`, {
         window: label,
       });
     }
 
-    return result(meta, 'good', 'good', label, `Dry and comfortable: ${parts.join(', ')}.`, { window: label });
+    return result(meta, 'good', 'good', label, `${tr(profile, 'adviceEngine.walkBestPlain', { window: label }, `The driest window is ${label}.`)} ${capitalize(parts.join(', '))}.`, { window: label });
   }
 
   // ==========================================================================
@@ -759,9 +765,9 @@
   // ==========================================================================
   function getCarWashAdvice(profile) {
     const meta = ADVICE_META.carWash;
-    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly forecast is available.');
+    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly forecast is available.', profile);
     if (!profile.rainAvailable) {
-      return notEnoughData(meta, 'This city has no precipitation probability or amount in the forecast.');
+      return notEnoughData(meta, 'This city has no precipitation probability or amount in the forecast.', profile);
     }
 
     const format = profile.format;
@@ -786,7 +792,7 @@
         meta,
         'good',
         'good',
-        'Good day to wash the car',
+        tr(profile, 'adviceEngine.carWashGood', null, 'Good day to wash the car'),
         `Dry conditions are forecast for about ${dryRun.length} hours, ${dryLabel}.${windNote}`,
         { window: dryLabel }
       );
@@ -794,7 +800,7 @@
 
     if (wetRun || !dryRunLast) {
       const when = isNum(profile.firstWetHour) ? ` from ${hourLabel(profile.firstWetHour)}` : ' later today';
-      return result(meta, 'bad', 'bad', 'Not ideal today', `Rain is expected${when}${wetLabel ? ` (${wetLabel})` : ''}.${windNote}`, {
+      return result(meta, 'bad', 'bad', tr(profile, 'adviceEngine.carWashBad', null, 'Not ideal today'), `${tr(profile, 'adviceEngine.carWashRainLater', { when, amount: wetLabel ? ` (${wetLabel})` : '' }, `Rain is expected${when}${wetLabel ? ` (${wetLabel})` : ''}.`)}${windNote}`, {
         window: dryLabel,
       });
     }
@@ -803,7 +809,7 @@
       ? ` The shortest dry stretch is ${dryLabel}.`
       : ' Wet or unsettled conditions are expected throughout.';
 
-    return result(meta, 'none', 'warn', 'Not ideal today', `Dry spells are too short to be worth it.${dryHint}`, {
+    return result(meta, 'none', 'warn', tr(profile, 'adviceEngine.carWashBad', null, 'Not ideal today'), tr(profile, 'adviceEngine.carWashDrySpells', { hint: dryHint }, `Dry spells are too short to be worth it.${dryHint}`), {
       window: dryLabel,
     });
   }
@@ -813,7 +819,7 @@
   // ==========================================================================
   function getCyclingAdvice(profile) {
     const meta = ADVICE_META.cycling;
-    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly forecast is available.');
+    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly forecast is available.', profile);
 
     const format = profile.format;
     const C = THRESHOLDS.cycling;
@@ -841,7 +847,7 @@
 
     if (isNum(maxWind) && maxWind >= C.strongWindKmh) {
       const when = windHour && isNum(windHour.hour) ? ` around ${hourLabel(windHour.hour)}` : '';
-      return result(meta, 'wind', 'bad', 'Not ideal for cycling', `Strong winds of about ${windText(format, maxWind)}${when} are expected.${darkNote}`);
+      return result(meta, 'wind', 'bad', tr(profile, 'adviceEngine.cyclingBad', null, 'Not ideal for cycling'), `${tr(profile, 'adviceEngine.cyclingWind', { wind: windText(format, maxWind), when }, `Strong winds of about ${windText(format, maxWind)}${when} are expected.`)}${darkNote}`);
     }
 
     if ((isNum(peakChance) && peakChance >= R.activityRainChance) || (isNum(peakMm) && peakMm >= R.activityRainMm)) {
@@ -849,14 +855,14 @@
       const amount = isNum(peakChance)
         ? `Rain probability reaches ${Math.round(peakChance)}%${when}.`
         : `Rain is forecast${when} (${precipText(format, peakMm)}/h).`;
-      return result(meta, 'rain', 'bad', 'Not ideal for cycling', `${amount}${darkNote}`);
+      return result(meta, 'rain', 'bad', tr(profile, 'adviceEngine.cyclingBad', null, 'Not ideal for cycling'), `${tr(profile, 'adviceEngine.cyclingRain', { amount }, amount)}${darkNote}`);
     }
 
     if (isNum(minTemp) && minTemp < C.tempMinC) {
-      return result(meta, 'cold', 'warn', 'Not ideal for cycling', `Very cold for riding - around ${tempText(format, minTemp)}.${darkNote}`);
+      return result(meta, 'cold', 'warn', tr(profile, 'adviceEngine.cyclingBad', null, 'Not ideal for cycling'), `${tr(profile, 'adviceEngine.cyclingCold', { temp: tempText(format, minTemp) }, `Very cold for riding - around ${tempText(format, minTemp)}.`)}${darkNote}`);
     }
     if (isNum(peakTemp) && peakTemp > C.tempMaxC) {
-      return result(meta, 'hot', 'warn', 'Not ideal for cycling', `Very warm for riding - up to ${tempText(format, peakTemp)}.${darkNote}`);
+      return result(meta, 'hot', 'warn', tr(profile, 'adviceEngine.cyclingBad', null, 'Not ideal for cycling'), `${tr(profile, 'adviceEngine.cyclingHot', { temp: tempText(format, peakTemp) }, `Very warm for riding - up to ${tempText(format, peakTemp)}.`)}${darkNote}`);
     }
 
     const breezeNote = isNum(maxWind) && maxWind >= C.noticeableWindKmh
@@ -864,7 +870,7 @@
       : '';
     const temps = tempRangeText(format, minTemp, peakTemp);
 
-    return result(meta, 'good', 'good', 'Good for cycling', `${temps ? `${temps}, ` : ''}dry and relatively light winds.${breezeNote}${darkNote}`);
+    return result(meta, 'good', 'good', tr(profile, 'adviceEngine.cyclingGood', null, 'Good for cycling'), tr(profile, 'adviceEngine.cyclingGoodDetail', { temps: temps ? `${temps}, ` : '' }, `${temps ? `${temps}, ` : ''}dry and relatively light winds.`) + `${breezeNote}${darkNote}`);
   }
 
   // ==========================================================================
@@ -875,7 +881,7 @@
   // ==========================================================================
   function getSwimmingAdvice(profile) {
     const meta = ADVICE_META.swimming;
-    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly temperatures are available.');
+    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly temperatures are available.', profile);
 
     const format = profile.format;
     const S = THRESHOLDS.swimming;
@@ -897,18 +903,18 @@
       const amount = isNum(peakChance)
         ? `Rain probability reaches ${Math.round(peakChance)}%${when}.`
         : `Rain is forecast${when}.`;
-      return result(meta, 'rain', 'bad', 'Not ideal today', `${amount} Best to stay out of the water.`);
+      return result(meta, 'rain', 'bad', tr(profile, 'adviceEngine.swimBad', null, 'Not ideal today'), tr(profile, 'adviceEngine.swimRain', { amount }, `${amount} Best to stay out of the water.`));
     }
 
     if (!isNum(peakTemp)) {
-      return notEnoughData(meta, 'No hourly air temperature is available for the daylight hours.');
+      return notEnoughData(meta, 'No hourly air temperature is available for the daylight hours.', profile);
     }
 
     if (peakTemp < S.minAirC) {
-      return result(meta, 'cold', 'warn', 'Not ideal today', `Cool for outdoor swimming - air around ${tempText(format, peakTemp)} at best.`);
+      return result(meta, 'cold', 'warn', tr(profile, 'adviceEngine.swimBad', null, 'Not ideal today'), tr(profile, 'adviceEngine.swimCold', { temp: tempText(format, peakTemp) }, `Cool for outdoor swimming - air around ${tempText(format, peakTemp)} at best.`));
     }
     if (peakTemp >= S.hotAirC) {
-      return result(meta, 'hot', 'warn', 'Not ideal today', `Very warm air, up to ${tempText(format, peakTemp)}. Stay in the shade between sessions.`);
+      return result(meta, 'hot', 'warn', tr(profile, 'adviceEngine.swimBad', null, 'Not ideal today'), tr(profile, 'adviceEngine.swimHot', { temp: tempText(format, peakTemp) }, `Very warm air, up to ${tempText(format, peakTemp)}. Stay in the shade between sessions.`));
     }
 
     const notes = [];
@@ -921,7 +927,7 @@
       meta,
       'good',
       'good',
-      'Good outdoor swimming weather',
+      tr(profile, 'adviceEngine.swimGood', null, 'Good outdoor swimming weather'),
       `Warm and mostly dry, around ${tempText(format, peakTemp)}${isNum(maxWind) ? ` with ${windDescriptor(maxWind)}` : ''}.${suffix}`
     );
   }
@@ -931,7 +937,7 @@
   // ==========================================================================
   function getClothingAdvice(profile) {
     const meta = ADVICE_META.clothing;
-    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly temperatures are available.');
+    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly temperatures are available.', profile);
 
     const format = profile.format;
     const K = THRESHOLDS.clothing;
@@ -966,15 +972,15 @@
       : '';
 
     if (!isNum(peak)) {
-      return notEnoughData(meta, 'No hourly temperature is available for this period.');
+      return notEnoughData(meta, 'No hourly temperature is available for this period.', profile);
     }
 
     if (peak >= 30) {
-      return result(meta, 'hot', 'warn', 'Light clothing', `Warm - around ${tempText(format, peak)} in the warmest part of the day.${swingNote}${uvNote}`);
+      return result(meta, 'hot', 'warn', tr(profile, 'adviceEngine.clothingLight', null, 'Light clothing'), tr(profile, 'adviceEngine.clothingWarm', { temp: tempText(format, peak) }, `Warm - around ${tempText(format, peak)} in the warmest part of the day.`) + `${swingNote}${uvNote}`);
     }
 
     if (rainExpected && peak < K.lightJacketC) {
-      return result(meta, 'cold-rain', 'bad', 'Warm jacket + umbrella', `Cold and wet - around ${tempRangeText(format, lowest, peak)} with rain expected.${windNote}`);
+      return result(meta, 'cold-rain', 'bad', tr(profile, 'adviceEngine.clothingJacketUmbrella', null, 'Warm jacket + umbrella'), tr(profile, 'adviceEngine.clothingJacketUmbrellaDetail', { temp: tempRangeText(format, lowest, peak) }, `Cold and wet - around ${tempRangeText(format, lowest, peak)} with rain expected.`) + windNote);
     }
 
     if (peak >= K.tShirtC) {
@@ -982,26 +988,26 @@
         meta,
         rainExpected ? 'warm-rain' : 't-shirt',
         rainExpected ? 'warn' : 'good',
-        rainExpected ? 'T-shirt weather + umbrella' : 'T-shirt weather',
+        rainExpected ? tr(profile, 'adviceEngine.clothingTShirtUmbrella', null, 'T-shirt weather + umbrella') : tr(profile, 'adviceEngine.clothingTShirt', null, 'T-shirt weather'),
         rainExpected
           ? `Warm but showers are possible - around ${tempText(format, peak)}.${windNote}`
-          : `Warm and dry${isNum(profile.maxWindKmh) && profile.maxWindKmh <= 12 ? ' with light winds' : ''}.${swingNote}${uvNote}`
+          : tr(profile, 'adviceEngine.clothingTShirtDetail', { wind: isNum(profile.maxWindKmh) && profile.maxWindKmh <= 12 ? tr(profile, 'adviceEngine.clothingTShirtWind', null, ' with light winds') : '' }, 'Warm and dry.') + `${swingNote}${uvNote}`
       );
     }
 
     if (peak >= K.lightJacketC) {
-      return result(meta, 'jacket', 'warn', 'Light jacket recommended', `Mild - around ${tempRangeText(format, lowest, peak)}.${swingNote}${windNote}`);
+      return result(meta, 'jacket', 'warn', tr(profile, 'adviceEngine.clothingLightJacket', null, 'Light jacket recommended'), tr(profile, 'adviceEngine.clothingLightJacketDetail', { temp: tempRangeText(format, lowest, peak) }, `Mild - around ${tempRangeText(format, lowest, peak)}.`) + `${swingNote}${windNote}`);
     }
 
     if (peak >= K.warmJacketC) {
-      return result(meta, 'warm-jacket', 'warn', 'Warm jacket recommended', `Cool - around ${tempRangeText(format, lowest, peak)}.${windNote}`);
+      return result(meta, 'warm-jacket', 'warn', tr(profile, 'adviceEngine.clothingWarmJacket', null, 'Warm jacket recommended'), tr(profile, 'adviceEngine.clothingWarmJacketDetail', { temp: tempRangeText(format, lowest, peak) }, `Cool - around ${tempRangeText(format, lowest, peak)}.`) + windNote);
     }
 
     if (peak >= K.coatC) {
-      return result(meta, 'coat', 'bad', 'Winter coat recommended', `Cold, around ${tempRangeText(format, lowest, peak)}.${windNote}`);
+      return result(meta, 'coat', 'bad', tr(profile, 'adviceEngine.clothingCoat', null, 'Winter coat recommended'), tr(profile, 'adviceEngine.clothingCoatDetail', { temp: tempRangeText(format, lowest, peak) }, `Cold, around ${tempRangeText(format, lowest, peak)}.`) + windNote);
     }
 
-    return result(meta, 'freezing', 'bad', 'Very warm layers needed', `Sub-zero, around ${tempRangeText(format, lowest, peak)}.${windNote}`);
+    return result(meta, 'freezing', 'bad', tr(profile, 'adviceEngine.clothingLayers', null, 'Very warm layers needed'), tr(profile, 'adviceEngine.clothingLayersDetail', { temp: tempRangeText(format, lowest, peak) }, `Sub-zero, around ${tempRangeText(format, lowest, peak)}.`) + windNote);
   }
 
   // ==========================================================================
@@ -1017,8 +1023,8 @@
         verdict: 'unknown',
         tone: 'unknown',
         icon: '🌧️',
-        headline: 'Not enough forecast data',
-        detail: 'This answer needs hourly precipitation data that is not available right now.',
+        headline: tr(profile, 'adviceEngine.notEnoughTitle', null, 'Not enough forecast data'),
+        detail: tr(profile, 'adviceEngine.notEnoughDetail', null, 'This answer needs hourly precipitation data that is not available right now.'),
       };
     }
     if (!profile.rainAvailable) {
@@ -1028,8 +1034,8 @@
         verdict: 'unknown',
         tone: 'unknown',
         icon: '🌧️',
-        headline: 'Not enough forecast data',
-        detail: 'This city has no precipitation probability or amount in the forecast.',
+        headline: tr(profile, 'adviceEngine.notEnoughTitle', null, 'Not enough forecast data'),
+        detail: tr(profile, 'adviceEngine.noPrecip', null, 'This city has no precipitation probability or amount in the forecast.'),
       };
     }
 
@@ -1045,8 +1051,8 @@
         verdict: 'unavailable',
         tone: 'unknown',
         icon: '🌧️',
-        headline: `${capitalize(windowDef.phrase)} is not in today's forecast`,
-        detail: `There are no remaining hours for ${range}.`,
+         headline: `${capitalize(tr(profile, `adviceEngine.phrase${windowDef.key.charAt(0).toUpperCase()}${windowDef.key.slice(1)}`, null, windowDef.phrase))} is not in today's forecast`,
+         detail: `There are no remaining hours for ${range}.`,
       };
     }
 
@@ -1068,8 +1074,8 @@
         verdict: 'likely',
         tone: 'bad',
         icon: '🌧️',
-        headline: `Rain possible during ${windowDef.phrase}`,
-        detail: amount,
+         headline: `Rain possible during ${tr(profile, `adviceEngine.phrase${windowDef.key.charAt(0).toUpperCase()}${windowDef.key.slice(1)}`, null, windowDef.phrase)}`,
+         detail: tr(profile, 'adviceEngine.rainWindowPeriod', null, amount),
       };
     }
 
@@ -1085,8 +1091,8 @@
         verdict: 'possible',
         tone: 'warn',
         icon: '🌦️',
-        headline: `A shower is possible during ${windowDef.phrase}`,
-        detail: amount,
+         headline: `A shower is possible during ${tr(profile, `adviceEngine.phrase${windowDef.key.charAt(0).toUpperCase()}${windowDef.key.slice(1)}`, null, windowDef.phrase)}`,
+         detail: tr(profile, 'adviceEngine.rainWindowLight', null, amount),
       };
     }
 
@@ -1097,7 +1103,7 @@
       verdict: 'dry',
       tone: 'good',
       icon: '☀️',
-      headline: `${capitalize(windowDef.phrase)} looks dry`,
+       headline: `${capitalize(tr(profile, `adviceEngine.phrase${windowDef.key.charAt(0).toUpperCase()}${windowDef.key.slice(1)}`, null, windowDef.phrase))} looks dry`,
       detail: `Low precipitation probability throughout ${range}${peakText}.`,
     };
   }
@@ -1116,9 +1122,9 @@
   }
 
   function getDaySummary(profile, decisions) {
-    const meta = { id: 'summary', icon: '⛅', label: "Today's advice" };
+    const meta = { id: 'summary', icon: '⛅', label: "Today's advice", key: 'adviceEngine.summaryLabel', t: profile && profile.t };
 
-    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly forecast is available.');
+    if (!profile || !profile.ok) return notEnoughData(meta, 'No usable hourly forecast is available.', profile);
 
     const format = profile.format;
     const S = THRESHOLDS.summary;
@@ -1133,19 +1139,20 @@
         meta,
         'snow',
         'warn',
-        'Snowy today',
-        snowRun
-          ? `Snow is forecast between ${rangeLabel(snowRun.startHour, snowRun.endHour)}. Allow extra travel time.`
-          : 'Snow is forecast today. Allow extra travel time.'
+         tr(profile, 'adviceEngine.summarySnow', null, 'Snowy today'),
+         tr(profile, 'adviceEngine.summarySnowDetail', null,
+           snowRun
+             ? `Snow is forecast between ${rangeLabel(snowRun.startHour, snowRun.endHour)}. Allow extra travel time.`
+             : 'Snow is forecast today. Allow extra travel time.')
       );
     }
 
     if (profile.groups.includes('storm')) {
-      return result(meta, 'storm', 'warn', 'Thunderstorms expected', 'Thunderstorms are forecast today - outdoor plans may be interrupted.');
+       return result(meta, 'storm', 'warn', tr(profile, 'adviceEngine.summaryStorm', null, 'Thunderstorms expected'), tr(profile, 'adviceEngine.summaryStormDetail', null, 'Thunderstorms are forecast today - outdoor plans may be interrupted.'));
     }
 
     if (umbrella && umbrella.verdict === 'definitely') {
-      return result(meta, umbrella.verdict, umbrella.tone, 'Take an umbrella today', umbrella.detail);
+       return result(meta, umbrella.verdict, umbrella.tone, tr(profile, 'adviceEngine.summaryUmbrella', null, 'Take an umbrella today'), umbrella.detail);
     }
 
     if (umbrella && umbrella.verdict === 'likely') {
@@ -1159,7 +1166,7 @@
           `Rain is expected later today - consider outdoor activities before ${hourLabel(firstWet)}.`
         );
       }
-      return result(meta, umbrella.verdict, umbrella.tone, 'Take an umbrella today', umbrella.detail);
+       return result(meta, umbrella.verdict, umbrella.tone, tr(profile, 'adviceEngine.summaryUmbrella', null, 'Take an umbrella today'), umbrella.detail);
     }
 
     if (isNum(profile.comfortMaxC) && profile.comfortMaxC <= S.coldC) {
@@ -1167,7 +1174,7 @@
         meta,
         'cold',
         'warn',
-        'Cold today',
+         tr(profile, 'adviceEngine.summaryCold', null, 'Cold today'),
         `Temperatures stay around ${tempText(format, profile.comfortMaxC)} through ${profile.scopePhrase}. A warm jacket is recommended.`
       );
     }
@@ -1177,7 +1184,7 @@
         meta,
         'hot',
         'warn',
-        'Hot today',
+         tr(profile, 'adviceEngine.summaryHot', null, 'Hot today'),
         `Temperatures reach ${tempText(format, profile.comfortMaxC)} in ${profile.scopePhrase}. Light clothing and sun protection help.`
       );
     }
@@ -1197,21 +1204,21 @@
         meta,
         'nice',
         'good',
-        'Great day to be outside',
+         tr(profile, 'adviceEngine.summaryGreat', null, 'Great day to be outside'),
         `Mostly dry with comfortable temperatures${range ? ` (${range})` : ''}.`
       );
     }
 
     if (profile.wetHours > 0) {
       const when = isNum(firstWet) ? ` from ${hourLabel(firstWet)}` : '';
-      return result(meta, 'mixed', 'warn', 'Mixed conditions today', `Unsettled spells are likely${when} during ${profile.scopePhrase}.`);
+       return result(meta, 'mixed', 'warn', tr(profile, 'adviceEngine.summaryMixed', null, 'Mixed conditions today'), tr(profile, 'adviceEngine.summaryMixedDetail', { when, scope: profile.scopePhrase }, `Unsettled spells are likely${when} during ${profile.scopePhrase}.`));
     }
 
     return result(
       meta,
       'cloudy',
       'neutral',
-      'Cloudy but dry today',
+       tr(profile, 'adviceEngine.summaryCloudyDry', null, 'Cloudy but dry today'),
       `No rain is forecast; around ${tempRangeText(format, profile.comfortMinC, profile.comfortMaxC)} with ${windDescriptor(profile.maxWindKmh) || 'variable winds'}.`
     );
   }
