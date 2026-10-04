@@ -4689,6 +4689,7 @@ const icon = document.createElement('span');
         btn.setAttribute('aria-checked', 'true');
         const lang = btn.dataset.lang;
         if (window.I18n) {
+          languagePicked = true;
           window.I18n.setLanguage(lang);
         }
       });
@@ -4819,16 +4820,35 @@ const icon = document.createElement('span');
   // ==========================================================================
   // Initialization
   // ==========================================================================
+  // Set the moment the visitor clicks EN / EL / DE: a network answer that
+  // arrives afterwards must not overwrite a deliberate choice.
+  let languagePicked = false;
+
   async function detectAndSetLanguage() {
     if (!window.I18n || typeof window.I18n.detectLanguage !== 'function') return;
-    const detected = await window.I18n.detectLanguage();
+    let detected = null;
+    try {
+      detected = await window.I18n.detectLanguage();
+    } catch (err) {
+      return;
+    }
     if (!detected || !detected.lang) return;
 
     // `init()` has already honoured an explicit query or stored preference.
     // Detection is only allowed to paint a first-time visitor and never writes
     // over a deliberate choice.
     if (detected.source === 'query' || detected.source === 'stored') return;
+    if (languagePicked) return;
     window.I18n.setLanguage(detected.lang, { persist: false });
+  }
+
+  function syncLanguageButtons() {
+    const lang = window.I18n ? window.I18n.getLanguage() : 'en';
+    const langBtns = document.querySelectorAll('.lang-btn');
+    langBtns.forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.lang === lang);
+      btn.setAttribute('aria-checked', btn.dataset.lang === lang ? 'true' : 'false');
+    });
   }
 
   function init() {
@@ -4857,14 +4877,11 @@ const icon = document.createElement('span');
     }
 
     // Detect and set language for a first-time visitor (IP/browser/timezone).
-    detectAndSetLanguage().then(() => {
-      const lang = window.I18n ? window.I18n.getLanguage() : 'en';
-      const langBtns = document.querySelectorAll('.lang-btn');
-      langBtns.forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.lang === lang);
-        btn.setAttribute('aria-checked', btn.dataset.lang === lang ? 'true' : 'false');
-      });
-    });
+    // Detection is best-effort: the buttons are re-synced whether it answers,
+    // falls back or throws, so they can never stay out of step with the text.
+    detectAndSetLanguage()
+      .catch(() => {})
+      .then(syncLanguageButtons);
 
     setupEvents();
 

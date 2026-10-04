@@ -20,7 +20,10 @@
  * --------------------------
  *    1. `?lang=` in the URL            - explicit, shareable, wins over storage
  *    2. `weatherscope_lang` in storage - the visitor's own click on EN / EL / DE
- *    3. the visitor's IP country        - a short HTTPS geo lookup
+ *    3. the visitor's IP country        - a short HTTPS geo lookup; a country
+ *                                          with no supported language falls
+ *                                          through to step 4 instead of
+ *                                          silently forcing English
  *    4. `navigator.languages`           - the browser's own preference
  *    5. the device timezone             - a last hint, e.g. Europe/Athens
  *    6. English                         - the fallback
@@ -62,16 +65,16 @@
   /**
    * Country (ISO 3166-1 alpha-2) -> supported language.
    *
-   * Only the countries whose language this app actually speaks are listed; every
-   * other country resolves to English through `langForCountry`.
+   * Only the countries where one of the three supported languages is the
+   * language of the majority are listed. Every other country has no opinion
+   * here and `langForCountry` returns null, so detection falls through to the
+   * visitor's own browser preference instead of forcing English on them.
    */
   const COUNTRY_LANGS = {
     // Greek
     GR: 'el', CY: 'el',
-    // German
+    // German (or a national language next to it)
     DE: 'de', AT: 'de', CH: 'de', LI: 'de', LU: 'de',
-    // German is a recognised minority language in a few more countries
-    BE: 'de', DK: 'de', NA: 'de',
   };
 
   /** Timezone -> language, used only when both IP and browser locale fail. */
@@ -1429,12 +1432,16 @@
     return SUPPORTED.indexOf(base) !== -1 ? base : null;
   }
 
-  /** The supported language a country belongs to (English everywhere else). */
+  /**
+   * The supported language a country speaks, or null when the IP country has
+   * no opinion - the caller then falls through to the browser's preference
+   * rather than assuming English.
+   */
   function langForCountry(countryCode) {
     if (typeof countryCode !== 'string') return null;
     const code = countryCode.trim().toUpperCase();
     if (!/^[A-Z]{2}$/.test(code)) return null;
-    return COUNTRY_LANGS[code] || DEFAULT_LANG;
+    return COUNTRY_LANGS[code] || null;
   }
 
   /** The supported language an IANA timezone suggests, or null. */
@@ -1446,13 +1453,38 @@
     return null;
   }
 
+  /**
+   * The visitor's own choice, or null.
+   *
+   * Entries are a small JSON object (`{"lang":"el","v":1}`) so an auto-stamped
+   * value can never be mistaken for a deliberate one: an earlier release wrote
+   * the *detected* language on every single visit, which silently disabled IP
+   * detection forever. Those bare codes are dropped once, on first read.
+   */
   function readStorage() {
     if (!win || !win.localStorage) return null;
+    let raw;
     try {
-      return normalize(win.localStorage.getItem(STORAGE_KEY));
+      raw = win.localStorage.getItem(STORAGE_KEY);
     } catch (err) {
       // Private mode / disabled storage: detection still works, the choice just
       // will not survive a reload.
+      return null;
+    }
+    if (!raw) return null;
+
+    const trimmed = String(raw).trim();
+    if (trimmed.charAt(0) !== '{') {
+      try {
+        win.localStorage.removeItem(STORAGE_KEY);
+      } catch (err) {
+        /* nothing to clean up */
+      }
+      return null;
+    }
+    try {
+      return normalize(JSON.parse(trimmed).lang);
+    } catch (err) {
       return null;
     }
   }
@@ -1460,7 +1492,7 @@
   function writeStorage(lang) {
     if (!win || !win.localStorage) return;
     try {
-      win.localStorage.setItem(STORAGE_KEY, lang);
+      win.localStorage.setItem(STORAGE_KEY, JSON.stringify({ lang, v: 1 }));
     } catch (err) {
       /* storage unavailable - the choice simply is not remembered */
     }
@@ -1649,7 +1681,10 @@
   function init() {
     const query = langFromQuery();
     if (query) {
-      setLanguage(query);
+      // A shareable `?lang=` link is a one-off override, not a click: it must
+      // not be persisted, otherwise opening such a link once would disable IP
+      // detection for every later visit.
+      setLanguage(query, { persist: false });
       return current;
     }
     persisted = readStorage();
@@ -1691,10 +1726,10 @@
       },
     },
     {
-      url: 'https://ipapi.co/json/',
+      url: 'https://get.geojs.io/v1/ip/country.json',
       parse: (body) => {
         const data = JSON.parse(body);
-        return data ? data.country_code : null;
+        return data ? data.country : null;
       },
     },
   ];
@@ -1734,7 +1769,9 @@
    * Order: `?lang=` -> stored choice -> IP country -> browser languages ->
    * device timezone -> English. The IP step races the key-free HTTPS endpoints
    * and takes the first one that actually answers; a failed, blocked, or
-   * slow lookup simply falls through to the browser's own preference.
+   * slow lookup simply falls through to the browser's own preference. An IP
+   * country that has no supported language (anything outside the map) counts
+   * as "no answer" so step 4 gets its turn.
    * Returns the language *and* how it was found, so callers can explain a
    * choice instead of silently overriding it.
    */
@@ -1745,25 +1782,37 @@
     const stored = readStorage();
     if (stored) return Promise.resolve({ lang: stored, source: 'stored' });
 
-    const attempts = GEO_ENDPOINTS.map(fetchCountry);
-    // Reject malformed/unusable responses before racing the endpoints. A valid
-    // country outside the Greek/German map intentionally resolves to English.
-    const supportedAttempts = attempts.map((attempt) => attempt.then((lang) => {
+    return raceIpLanguage()
+      .then((lang) => (lang ? { lang, source: 'ip' } : fallbackLang()))
+      .catch(() => fallbackLang());
+  }
+
+  /**
+   * The first endpoint to answer with a usable language wins.
+   *
+   * Every attempt is consumed by exactly one branch, so a slow or blocked
+   * endpoint can never leave an unhandled rejection behind - which would have
+   * logged a scary error on every page load for anyone whose fourth provider
+   * is rate-limiting.
+   */
+  function raceIpLanguage() {
+    const attempts = GEO_ENDPOINTS.map((endpoint) => fetchCountry(endpoint).then((lang) => {
       if (!lang) throw new Error('geo language unavailable');
       return lang;
     }));
-    const fromNetwork = typeof Promise.any === 'function'
-      ? Promise.any(supportedAttempts)
-      : Promise.allSettled(attempts).then(
-        (results) => results.find((r) => r.status === 'fulfilled' && !!r.value) || Promise.reject(new Error('geo unavailable'))
-      );
 
-    return fromNetwork
-      .then((lang) => {
-        if (lang) return { lang, source: 'ip' };
-        return fallbackLang();
-      })
-      .catch(() => fallbackLang());
+    if (typeof Promise.any === 'function') return Promise.any(attempts);
+
+    // Promise.any is missing on older Safari / Firefox / Edge: emulate it, but
+    // hand the caller the winning *value*, never the settled result object.
+    if (typeof Promise.allSettled === 'function') {
+      return Promise.allSettled(attempts).then((results) => {
+        const hit = results.find((result) => result.status === 'fulfilled');
+        if (!hit) throw new Error('geo unavailable');
+        return hit.value;
+      });
+    }
+    return Promise.reject(new Error('geo unavailable'));
   }
 
   /** When no IP answer arrives: browser language, then timezone, then English. */
