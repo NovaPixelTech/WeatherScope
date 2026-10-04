@@ -4684,23 +4684,14 @@ const icon = document.createElement('span');
         });
       });
     }
-    // Language toggle buttons
-    const langBtns = document.querySelectorAll('.lang-btn');
-    langBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        langBtns.forEach(b => {
-          b.classList.remove('active');
-          b.setAttribute('aria-checked', 'false');
-        });
-        btn.classList.add('active');
-        btn.setAttribute('aria-checked', 'true');
-        const lang = btn.dataset.lang;
-        if (window.I18n) {
-          languagePicked = true;
-          window.I18n.setLanguage(lang);
-        }
+    const languagePicker = document.getElementById('language-picker');
+    if (languagePicker) {
+      languagePicker.addEventListener('change', () => {
+        if (!window.I18n) return;
+        languagePicked = true;
+        window.I18n.setLanguage(languagePicker.value);
       });
-    });
+    }
 
     if (elements.shareBtn) {
       elements.shareBtn.addEventListener('click', function() {
@@ -4827,7 +4818,7 @@ const icon = document.createElement('span');
   // ==========================================================================
   // Initialization
   // ==========================================================================
-  // Set the moment the visitor clicks EN / EL / DE: a network answer that
+  // Set the moment the visitor chooses a language: a network answer that
   // arrives afterwards must not overwrite a deliberate choice.
   let languagePicked = false;
 
@@ -4875,11 +4866,8 @@ const icon = document.createElement('span');
 
   function syncLanguageButtons() {
     const lang = window.I18n ? window.I18n.getLanguage() : 'en';
-    const langBtns = document.querySelectorAll('.lang-btn');
-    langBtns.forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.lang === lang);
-      btn.setAttribute('aria-checked', btn.dataset.lang === lang ? 'true' : 'false');
-    });
+    const languagePicker = document.getElementById('language-picker');
+    if (languagePicker) languagePicker.value = lang;
   }
 
   function init() {
@@ -4912,7 +4900,10 @@ const icon = document.createElement('span');
     // falls back or throws, so they can never stay out of step with the text.
     detectAndSetLanguage()
       .catch(() => {})
-      .then(syncLanguageButtons);
+      .then(() => {
+        syncLanguageButtons();
+        document.documentElement.removeAttribute('data-language-pending');
+      });
 
     setupEvents();
 

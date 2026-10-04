@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script>document.documentElement.setAttribute('data-language-pending', 'true');</script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>WeatherScope - Climate & City Forecasts</title>
@@ -172,11 +173,17 @@
           <button type="button" class="unit-btn" data-unit="fahrenheit" id="unit-f" role="radio" aria-checked="false">°F</button>
         </div>
 
-        <div class="lang-toggle" role="radiogroup" aria-label="Language selection" data-i18n-aria-label="nav.languageAria">
-          <button type="button" class="lang-btn active" data-lang="en" id="lang-en" role="radio" aria-checked="true">EN</button>
-          <button type="button" class="lang-btn" data-lang="el" id="lang-el" role="radio" aria-checked="false">EL</button>
-          <button type="button" class="lang-btn" data-lang="de" id="lang-de" role="radio" aria-checked="false">DE</button>
-        </div>
+        <label class="language-picker-label" for="language-picker" data-i18n="nav.languageAria">Language</label>
+        <select class="language-picker" id="language-picker" aria-label="Language selection" data-i18n-aria-label="nav.languageAria">
+          <option value="en">English (EN)</option>
+          <option value="el">Ελληνικά (EL)</option>
+          <option value="de">Deutsch (DE)</option>
+          <option value="it">Italiano (IT)</option>
+          <option value="es">Español (ES)</option>
+          <option value="fr">Français (FR)</option>
+          <option value="it">Italiano (IT)</option>
+          <option value="es">Español (ES)</option>
+        </select>
       </div>
     </header>
 
@@ -786,6 +793,7 @@
   <!-- Pure forecast logic, no DOM access: loaded before the app so the
        dashboard can render recommendations from data it already has. -->
   <script src="i18n.js"></script>
+  <script src="fr.js"></script>
   <script src="advice.js"></script>
   <!-- Pure comparison logic (location list, metrics, insights), no DOM access -->
   <script src="compare.js"></script>

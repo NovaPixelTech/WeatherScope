@@ -1,7 +1,7 @@
 /**
  * WeatherScope - Internationalisation
  * =========================================================================
- * One dictionary, three languages (English, Greek, German), and no build step.
+ * One dictionary, six languages (English, Greek, German, Italian, Spanish, French), and no build step.
  *
  * How a string gets to the screen
  * -------------------------------
@@ -19,19 +19,13 @@
  * How the language is chosen
  * --------------------------
  *    1. `?lang=` in the URL            - explicit, shareable, wins over storage
- *    2. `weatherscope_lang` in storage - the visitor's own click on EN / EL / DE
- *    3. the visitor's IP country        - a short HTTPS geo lookup; a country
- *                                          with no supported language falls
- *                                          through to step 4 instead of
- *                                          silently forcing English
- *    4. `navigator.languages`           - the browser's own preference
- *    5. the device timezone             - a last hint, e.g. Europe/Athens
- *    6. English                         - the fallback
+ *    2. `weatherscope_lang` in storage - the visitor's saved dropdown choice
+ *    3. the visitor's IP country        - selects its embedded language, or
+ *                                          English if the country is unmapped
+ *    4. English                         - fallback when IP detection fails
  *
- * Steps 3-5 are all best-effort and never block first paint: the page renders in
- * step 1/2's language immediately and is repainted if detection disagrees.
- * Once the visitor clicks a language the choice is persisted and detection is
- * never run again.
+ * The page waits for IP detection before showing text. A query or saved choice
+ * takes precedence over IP; later dropdown selections are persisted.
  *
  * Loading contract: plain classic script (no build step). It publishes
  * `window.I18n`, and also supports `module.exports` for the tests.
@@ -52,32 +46,41 @@
   // ==========================================================================
   // Supported languages
   // ==========================================================================
-  const SUPPORTED = ['en', 'el', 'de'];
+  const SUPPORTED = ['en', 'el', 'de', 'it', 'es', 'fr'];
   const DEFAULT_LANG = 'en';
 
   /** BCP-47 locale used for Intl formatting (dates, name sorting). */
-  const INTL_LOCALES = { en: 'en-GB', el: 'el-GR', de: 'de-DE' };
+  const INTL_LOCALES = { en: 'en-GB', el: 'el-GR', de: 'de-DE', it: 'it-IT', es: 'es-ES', fr: 'fr-FR' };
 
-  const HTML_LANGS = { en: 'en', el: 'el', de: 'de' };
+  const HTML_LANGS = { en: 'en', el: 'el', de: 'de', it: 'it', es: 'es', fr: 'fr' };
 
   const STORAGE_KEY = 'weatherscope_lang';
 
   /**
    * Country (ISO 3166-1 alpha-2) -> supported language.
    *
-   * Only the countries where one of the three supported languages is the
-   * language of the majority are listed. Every other country has no opinion
-   * here and `langForCountry` returns null, so detection falls through to the
-   * visitor's own browser preference instead of forcing English on them.
+   * Countries and regions mapped to the embedded native-language dictionaries.
+   * An unmapped country resolves to the English default.
    */
   const COUNTRY_LANGS = {
     // Greek
     GR: 'el', CY: 'el',
     // German-speaking countries and regions
-    DE: 'de', AT: 'de', CH: 'de', LI: 'de', LU: 'de', BE: 'de',
+    DE: 'de', AT: 'de', CH: 'de', LI: 'de', LU: 'de',
+    // Italian-speaking countries and regions
+    IT: 'it', SM: 'it', VA: 'it',
+    // Spanish-speaking countries and regions
+    ES: 'es', MX: 'es', AR: 'es', BO: 'es', CL: 'es', CO: 'es', CR: 'es',
+    CU: 'es', DO: 'es', EC: 'es', SV: 'es', GQ: 'es', GT: 'es', HN: 'es',
+    NI: 'es', PA: 'es', PY: 'es', PE: 'es', PR: 'es', UY: 'es', VE: 'es',
+    // French-speaking countries and regions
+    FR: 'fr', MC: 'fr', BE: 'fr', CI: 'fr', SN: 'fr', CD: 'fr', CG: 'fr',
+    CM: 'fr', MG: 'fr', HT: 'fr', BJ: 'fr', BF: 'fr', BI: 'fr', DJ: 'fr',
+    GA: 'fr', GN: 'fr', ML: 'fr', NE: 'fr', RW: 'fr', TG: 'fr', TD: 'fr',
+    CF: 'fr',
   };
 
-  /** Timezone -> language, used only when both IP and browser locale fail. */
+  /** Retained timezone hints for consumers; IP-based startup does not use them. */
   const ZONE_LANGS = [
     { match: /^(Europe|Athens|_)/, test: /Athens/i, lang: 'el' },
   ];
@@ -1430,6 +1433,568 @@
       'assistant.windowTitle': 'Regen während Ihrer…?',
       'assistant.windowTitlePlain': 'Regen während...',
     },
+
+    it: {
+      'app.name': 'WeatherScope',
+      'app.title': 'WeatherScope - Clima e previsioni delle città',
+      'app.description': 'Cerca le condizioni meteo in tempo reale per città o scopri località in tutto il mondo con il clima che preferisci.',
+      'app.noscript': 'WeatherScope richiede JavaScript per recuperare e mostrare i dati meteorologici in tempo reale.',
+      'app.noscriptHint': 'Attiva JavaScript nel browser e ricarica la pagina.',
+      'search.searchingFor': 'Ricerca di "{city}"...',
+      'search.matchingLocations': '{count} località corrispondenti: selezionane una',
+      'nav.modeAria': 'Selezione modalità di ricerca', 'nav.citySearch': 'Cerca città',
+      'nav.compare': 'Confronta', 'nav.climateFilter': 'Filtro climatico',
+      'nav.unitAria': 'Selezione unità di temperatura', 'nav.languageAria': 'Selezione lingua',
+      'nav.yourTime': 'La tua ora', 'nav.searchModeCity': 'Cerca città',
+      'nav.searchModeCompare': 'Confronta', 'nav.searchModeClimate': 'Filtro climatico',
+      'search.placeholderCity': 'Cerca una città (es. Roma, Tokyo, New York)...',
+      'search.placeholderCompare': 'Aggiungi una località da confrontare (es. Roma, Oslo, Il Cairo)...',
+      'search.placeholderClimate': 'Cerca clima: Soleggiato, Caldo, Pioggia, Neve, > 25°C...',
+      'search.submit': 'Cerca', 'search.inputAria': 'Cerca una città o una condizione climatica',
+      'search.clearAria': 'Cancella campo', 'search.suggestionsAria': 'Suggerimenti di ricerca',
+      'search.useLocation': 'Usa la posizione attuale',
+      'climate.presetClimates': 'Climi predefiniti:', 'climate.sunny': 'Soleggiato',
+      'climate.cloudy': 'Nuvoloso', 'climate.rainy': 'Piovoso', 'climate.snowy': 'Nevoso',
+      'climate.storm': 'Temporale', 'climate.freezing': 'Gelo', 'climate.cold': 'Freddo',
+      'climate.cool': 'Fresco', 'climate.mild': 'Mite', 'climate.warm': 'Caldo',
+      'climate.hot': 'Molto caldo', 'climate.humid': 'Umido', 'climate.dry': 'Secco',
+      'climate.windy': 'Ventoso', 'climate.gale': 'Burrasca', 'climate.beachDay': 'Giornata al mare',
+      'climate.skiTrip': 'Gita sugli sci', 'climate.tropical': 'Tropicale',
+      'climate.mildBreezy': 'Mite e ventilato', 'climate.rainyMild': 'Piovoso e mite',
+      'climate.resultsTitle': 'Città con condizioni climatiche corrispondenti',
+      'climate.resultsAria': 'Città corrispondenti', 'climate.foundOne': 'Trovata {count} città',
+      'climate.foundMany': 'Trovate {count} città',
+      'climate.clickToExplore': 'Seleziona una città per esplorare il meteo in tempo reale e le previsioni a 7 giorni.',
+      'climate.sortLabel': 'Ordina:', 'climate.sortNameAsc': 'Nome città (A-Z)',
+      'climate.sortNameDesc': 'Nome città (Z-A)', 'climate.sortTemperature': 'Temperatura',
+      'climate.sortHumidity': 'Umidità', 'climate.sortWind': 'Velocità del vento',
+      'climate.sortHighToLow': '{label} (dal più alto al più basso)',
+      'climate.sortLowToHigh': '{label} (dal più basso al più alto)',
+      'climate.resultsSubtitle': 'Cercate {count} città di riferimento in tutto il mondo. Seleziona una città per esplorare il meteo in tempo reale e le previsioni a 7 giorni.',
+      'climate.emptyTitle': 'Nessuna delle {count} città di riferimento corrisponde esattamente a questi criteri climatici.',
+      'climate.emptyHint': 'Prova una condizione più ampia come "Soleggiato", "Caldo" o "Nuvoloso".',
+      'climate.viewDetails': 'Vedi dettagli meteo', 'climate.cardHumidityTitle': 'Umidità relativa',
+      'climate.cardWindTitle': 'Velocità del vento', 'climate.discovery': 'Esplora il clima',
+      'climate.backToMatching': 'Torna alle città corrispondenti ({count})',
+      'climate.searchWorldwide': 'Cerca in tutto il mondo città che corrispondono a "{query}" →',
+      'climate.searching': 'Ricerca di città con il clima selezionato...',
+      'climate.errorTitle': 'Errore nella ricerca climatica',
+      'climate.errorBody': 'Impossibile recuperare i dati meteorologici globali. Riprova.',
+      'state.fetching': 'Recupero dei dati meteorologici in tempo reale...',
+      'state.fetchingCity': 'Recupero del meteo in tempo reale per {city}...',
+      'state.errorTitle': 'Nessun risultato corrispondente',
+      'state.errorBody': 'Non è stato possibile recuperare i risultati. Modifica i criteri e riprova.',
+      'state.retry': 'Prova un’altra ricerca', 'state.backToResults': 'Torna ai risultati climatici',
+      'state.weatherUnavailableTitle': 'Dati meteo non disponibili',
+      'state.weatherUnavailableBody': 'Impossibile recuperare il meteo per "{city}". Controlla la connessione e riprova.',
+      'state.cityNotFoundTitle': 'Città non trovata',
+      'state.cityNotFoundBody': 'Nessun risultato per "{city}". Prova una grafia diversa o aggiungi il Paese.',
+      'state.searchFailedTitle': 'Ricerca non riuscita',
+      'state.searchTimedOut': 'La ricerca è scaduta. Controlla la connessione e riprova.',
+      'state.searchFailed': 'Errore durante la ricerca della città. Riprova.',
+      'geo.button': 'Usa la posizione attuale', 'geo.detecting': 'Rilevamento della posizione...',
+      'geo.unsupportedTitle': 'Geolocalizzazione non supportata',
+      'geo.unsupported': 'Il browser non supporta il rilevamento automatico della posizione.',
+      'geo.deniedTitle': 'Accesso alla posizione negato',
+      'geo.denied': 'Impossibile ottenere la posizione. Controlla i permessi o cerca direttamente la città.',
+      'geo.myLocation': 'La mia posizione',
+      'compare.heading': 'Confronta località', 'compare.count': '{selected} di {max} selezionate',
+      'compare.subtitle': 'Cerca qui sopra o scegli una città popolare, poi confronta da 2 a 4 località.',
+      'compare.addLocation': 'Aggiungi località', 'compare.run': 'Confronta',
+      'compare.clearAll': 'Cancella tutto', 'compare.loading': 'Confronto del meteo...',
+      'compare.glanceHeading': 'Il meteo a colpo d’occhio',
+      'compare.legendHigh': 'Valore più alto nella riga', 'compare.legendLow': 'Valore più basso nella riga',
+      'compare.currentHeading': 'Condizioni attuali',
+      'compare.forecastHeading': 'Confronto delle previsioni di oggi',
+      'compare.forecastSubtitle': 'Massime, minime, probabilità di pioggia e valori di picco',
+      'compare.metricHead': 'Metrica', 'compare.locationSlot': 'Località {slot}',
+      'compare.locationSlotEmpty': 'Località {slot} — usa la ricerca o una città popolare',
+      'compare.add': 'Aggiungi', 'compare.moveEarlier': 'Sposta prima',
+      'compare.moveLater': 'Sposta dopo', 'compare.removeCity': 'Rimuovi {city} dal confronto',
+      'compare.clearSlot': 'Rimuovi questa località', 'compare.unknownLocation': 'Località sconosciuta',
+      'compare.selectedLocation': 'Località selezionata', 'compare.locationFallback': 'Località',
+      'compare.weatherUnavailable': 'Meteo non disponibile', 'compare.tryAgain': 'Riprova',
+      'compare.highest': 'più alto', 'compare.lowest': 'più basso',
+      'compare.freshness': 'Ultima lettura: {label}',
+      'compare.needTwoLocations': 'Servono almeno due località con dati meteo per il confronto.',
+      'compare.verySimilar': 'Le località sono molto simili al momento; non emergono differenze.',
+      'compare.duplicate': '{city} è già presente nel confronto.',
+      'compare.listFull': 'Puoi confrontare fino a {max} località. Rimuovine una per aggiungerne un’altra.',
+      'compare.couldNotAdd': 'Impossibile aggiungere la località al confronto.',
+      'compare.changeLocation': '{city}, {meta}. Cambia questa località.',
+      'compare.retryAria': 'Riprova a caricare il meteo per {city}',
+      'compare.thisLocation': 'questa località',
+      'compare.ariaExtreme': '{value}, {word} tra le località confrontate',
+      'compare.ariaExtremeTitle': '{word} per {row}',
+      'compare.replacing': 'Scegli una nuova località per la posizione {slot} (attualmente {city}). Premi Esc per annullare.',
+      'compare.noResults': 'Nessun risultato per "{query}". Prova una grafia diversa o aggiungi il Paese.',
+      'compare.searchTimedOut': 'La ricerca della località è scaduta. Controlla la connessione e riprova.',
+      'compare.searchFailed': 'Ricerca della località non riuscita. Riprova.',
+      'compare.locationZone': 'Fuso orario locale {zone}, {diff}',
+      'glance.heading': 'Oggi a colpo d’occhio', 'glance.feelsLike': 'Percepita',
+      'glance.verdictLabel': 'Il verdetto di oggi:', 'glance.whatToWear': 'Come vestirsi:',
+      'hero.feelsLike': 'Percepita', 'hero.shareAria': 'Condividi il meteo',
+      'hero.refreshAria': 'Aggiorna i dati meteo', 'metrics.aria': 'Metriche meteo principali',
+      'metrics.heading': 'Condizioni attuali', 'metrics.humidity': 'Umidità',
+      'metrics.wind': 'Vento', 'metrics.uvIndex': 'Indice UV', 'metrics.pressure': 'Pressione',
+      'metrics.precipitation': 'Precipitazioni', 'metrics.localTime': 'Ora locale',
+      'metrics.sunriseSunset': 'Alba e tramonto', 'metrics.sunrise': 'Alba',
+      'metrics.sunset': 'Tramonto', 'metrics.cloudCover': 'Copertura nuvolosa: {value}%',
+      'metrics.humidityDry': 'Ambiente secco', 'metrics.humidityComfortable': 'Umidità confortevole',
+      'metrics.humidityHigh': 'Umidità elevata', 'metrics.pressureNormal': 'Pressione normale',
+      'metrics.pressureHigh': 'Alta pressione', 'metrics.pressureLow': 'Bassa pressione',
+      'metrics.uvLow': 'Basso', 'metrics.uvModerate': 'Moderato', 'metrics.uvHigh': 'Alto',
+      'metrics.uvVeryHigh': 'Molto alto', 'metrics.uvExtreme': 'Estremo',
+      'metrics.uvAdviceLow': 'Basso rischio di danni solari',
+      'metrics.uvAdviceModerate': 'Si consiglia protezione solare',
+      'metrics.uvAdviceHigh': 'Indossa cappello e crema solare',
+      'metrics.uvAdviceVeryHigh': 'Evita il sole nelle ore centrali',
+      'metrics.uvAdviceExtreme': 'Adotta tutte le precauzioni contro il sole',
+      'forecast.hourlyHeading': 'Previsioni a 24 ore', 'forecast.hourlySubtitle': 'Previsioni orarie locali ·',
+      'forecast.dailyHeading': 'Previsioni a 7 giorni', 'forecast.dailySubtitle': 'Previsioni dei prossimi giorni ·',
+      'forecast.cityTime': 'ora locale', 'forecast.hourlyAria': 'Previsioni meteo orarie',
+      'forecast.now': 'Adesso', 'forecast.today': 'Oggi', 'forecast.maxUvTitle': 'Indice UV massimo',
+      'forecast.precipChanceTitle': 'Probabilità di precipitazioni',
+      'popular.label': 'Popolari:', 'footer.providedBy': 'Dati forniti da {link}',
+      'footer.tagline': 'Dati meteorologici globali in tempo reale',
+      'footer.timezoneNote': 'Gli orari locali usano il fuso IANA di ogni città e si aggiornano in tempo reale · Il tuo fuso orario di riferimento è {zone}',
+      'time.sameAsYou': 'Stessa ora tua', 'time.sameAsYouShort': 'Stessa ora',
+      'time.aheadOf': '{value} avanti a te', 'time.behind': '{value} indietro rispetto a te',
+      'time.detectedZone': 'Fuso orario rilevato: {zone}',
+      'time.localTimeAria': 'Ora locale rilevata dal fuso orario {zone}',
+      'time.youClock': 'Tu {time}', 'time.yourZoneTitle': 'Il tuo fuso orario: {zone}',
+      'time.allTimesIn': 'Tutti gli orari in {zone}', 'nav.detectedLocation': 'Posizione rilevata',
+      'nav.yourIP': 'Il tuo IP', 'nav.countryCity': '{country}, {city}',
+      'time.offsetVsYou': 'Differenza rispetto a te ({zone}): {value}',
+      'time.freshnessNow': 'Aggiornato adesso', 'time.freshnessMinutes': 'Aggiornato {count} min fa',
+      'time.freshnessHours': 'Aggiornato {count} ora fa', 'time.freshnessHoursPlural': 'Aggiornato {count} ore fa',
+      'time.freshnessDays': 'Aggiornato {count} giorno fa', 'time.freshnessDaysPlural': 'Aggiornato {count} giorni fa',
+      'share.forecast': 'Previsioni condivise', 'share.showAllCards': 'Mostra tutte le schede',
+      'share.button': 'Condividi il meteo', 'share.weatherIn': 'Meteo a {place}',
+      'share.rain': '{value}% di pioggia', 'share.high': 'Massima {value}', 'share.low': 'Minima {value}',
+      'share.copied': 'Link copiato. Aprendolo vedrai {place} con le schede condivise.',
+      'share.copyFailedInBar': 'Copia automatica non riuscita. Il link per {place} è ora nella barra degli indirizzi.',
+      'share.copyFailed': 'Copia automatica non riuscita. Copia il link dalla barra degli indirizzi per condividere le previsioni.',
+      'wmo.0': 'Cielo sereno', 'wmo.1': 'Prevalentemente sereno', 'wmo.2': 'Parzialmente nuvoloso',
+      'wmo.3': 'Coperto', 'wmo.45': 'Nebbia', 'wmo.48': 'Nebbia congelante',
+      'wmo.51': 'Pioviggine debole', 'wmo.53': 'Pioviggine moderata', 'wmo.55': 'Pioviggine intensa',
+      'wmo.56': 'Pioviggine congelante', 'wmo.57': 'Pioviggine congelante intensa',
+      'wmo.61': 'Pioggia debole', 'wmo.63': 'Pioggia moderata', 'wmo.65': 'Pioggia intensa',
+      'wmo.66': 'Pioggia congelante', 'wmo.67': 'Pioggia congelante intensa',
+      'wmo.71': 'Neve debole', 'wmo.73': 'Neve moderata', 'wmo.75': 'Neve intensa',
+      'wmo.77': 'Granuli di neve', 'wmo.80': 'Rovesci deboli', 'wmo.81': 'Rovesci moderati',
+      'wmo.82': 'Rovesci violenti', 'wmo.85': 'Rovesci di neve', 'wmo.86': 'Rovesci di neve intensi',
+      'wmo.95': 'Temporale', 'wmo.96': 'Temporale con grandine', 'wmo.99': 'Forte temporale con grandine',
+      'wmo.unknown': 'Sereno',
+      'glanceEngine.storm': 'Temporali previsti', 'glanceEngine.snow': 'Neve oggi',
+      'glanceEngine.freezing': 'Freddo gelido', 'glanceEngine.hot': 'Molto caldo',
+      'glanceEngine.umbrella': 'Ombrello consigliato', 'glanceEngine.gale': 'Molto ventoso',
+      'glanceEngine.good': 'Bel tempo', 'glanceEngine.around': ' intorno alle {time}',
+      'glanceEngine.at': ' alle {time}',
+      'glanceEngine.detailStorm': 'Sono previsti temporali{when}: i programmi all’aperto potrebbero interrompersi.',
+      'glanceEngine.detailSnow': 'È prevista neve{when}: calcola più tempo per gli spostamenti.',
+      'glanceEngine.detailFreezing': 'Temperatura percepita {temp}{when}: servono strati pesanti.',
+      'glanceEngine.detailHot': 'Temperatura percepita {temp}{when}: cerca l’ombra e idratati.',
+      'glanceEngine.detailRainNow': 'Sta piovendo ({amount} nell’ultima ora).',
+      'glanceEngine.detailRainNowShort': 'Sta piovendo.',
+      'glanceEngine.detailRainPeak': 'La pioggia raggiungerà il picco di {value}{when}.',
+      'glanceEngine.detailLightPrecip': 'Oggi sono previste precipitazioni leggere.',
+      'glanceEngine.detailWinds': 'Oggi il vento raggiungerà {value}: una giornata ventosa.',
+      'glanceEngine.detailVeryWindy': 'Oggi sarà molto ventoso.',
+      'glanceEngine.detailMostlyDry': 'Prevalentemente asciutto', 'glanceEngine.detailDry': 'Asciutto',
+      'glanceEngine.detailComfortable': 'e piacevole, intorno a {value}',
+      'glanceEngine.detailWithWind': 'con {value}', 'glanceEngine.windLight': 'vento leggero',
+      'glanceEngine.windBreeze': 'una brezza', 'glanceEngine.windStrong': 'vento forte',
+      'glanceEngine.windVeryStrong': 'vento molto forte', 'glanceEngine.metricRain': 'Pioggia',
+      'glanceEngine.metricWind': 'Vento', 'glanceEngine.metricHumidity': 'Umidità',
+      'glanceEngine.hintPeakToday': 'probabilità massima oggi', 'glanceEngine.hintNotReported': 'non segnalato',
+      'glanceEngine.hintRelativeHumidity': 'umidità relativa',
+      'compareEngine.metricCondition': 'Meteo', 'compareEngine.metricTemperature': 'Temperatura',
+      'compareEngine.metricApparent': 'Percepita', 'compareEngine.metricRainChance': 'Probabilità di pioggia',
+      'compareEngine.metricWind': 'Vento', 'compareEngine.metricPressure': 'Pressione',
+      'compareEngine.metricCloudCover': 'Copertura nuvolosa', 'compareEngine.metricSun': 'Alba / tramonto',
+      'compareEngine.metricPrecipitation': 'Precipitazioni', 'compareEngine.metricUv': 'Indice UV',
+      'compareEngine.metricMaxUv': 'UV massimo', 'compareEngine.metricMaxWind': 'Vento massimo',
+      'compareEngine.warmer': 'più caldo', 'compareEngine.cooler': 'più fresco',
+      'compareEngine.insightTemperature': '{city} è {gap} {word} di {other}.',
+      'compareEngine.insightApparent': 'A {city} la temperatura percepita è {gap} {word} rispetto a {other}.',
+      'compareEngine.insightRain': '{city} ha una probabilità di pioggia minore ({low} contro {high}).',
+      'compareEngine.insightWind': 'Il vento a {city} è più forte di {gap} rispetto a {other}.',
+      'compareEngine.insightPressure': 'La pressione a {city} è maggiore di {gap} rispetto a {other}.',
+      'compareEngine.insightCloud': '{city} è più nuvolosa di {gap} rispetto a {other}.',
+      'compareEngine.insightSun': 'Il sole sorge prima di {gap} a {city} rispetto a {other}.',
+      'compareEngine.insightPrecip': '{city} ha {gap} precipitazioni in più rispetto a {other}.',
+      'compareEngine.insightUv': 'L’indice UV a {city} è maggiore di {gap} rispetto a {other}.',
+      'compareEngine.insightMaxUv': 'Oggi l’indice UV massimo a {city} è maggiore di {gap} rispetto a {other}.',
+      'compareEngine.insightMaxWind': 'Oggi il vento più forte a {city} è più veloce di {gap} rispetto a {other}.',
+      'compareEngine.gapWarmer': ' più caldo', 'compareEngine.gapCooler': ' più fresco',
+      'compareEngine.gapStronger': ' più forte', 'compareEngine.gapHigher': ' più alto',
+      'compareEngine.gapCloudier': ' più nuvoloso', 'compareEngine.gapEarlier': ' prima',
+      'compareEngine.gapMore': ' in più', 'compareEngine.gapFaster': ' più veloce',
+      'assistant.heading': 'Consigli per oggi', 'assistant.scopeToday': 'In base al resto della giornata',
+      'assistant.scopeNext24': 'In base alle prossime 24 ore', 'assistant.preparing': 'Preparazione delle previsioni…',
+      'assistant.windowTitle': 'Pioggia durante…?', 'assistant.windowTitlePlain': 'Pioggia durante...?',
+      'adviceEngine.windowMorning': 'Mattina', 'adviceEngine.windowMidday': 'Mezzogiorno',
+      'adviceEngine.windowAfternoon': 'Pomeriggio', 'adviceEngine.windowEvening': 'Sera',
+      'adviceEngine.phraseMorning': 'la mattina', 'adviceEngine.phraseMidday': 'le ore centrali',
+      'adviceEngine.phraseAfternoon': 'il pomeriggio', 'adviceEngine.phraseEvening': 'la sera',
+      'adviceEngine.tileUmbrella': 'Ombrello', 'adviceEngine.tileWalk': 'Passeggiata',
+      'adviceEngine.tileCarWash': 'Lavare l’auto', 'adviceEngine.tileCycling': 'Bicicletta',
+      'adviceEngine.tileSwimming': 'Nuoto', 'adviceEngine.tileClothing': 'Come vestirsi',
+      'adviceEngine.summaryLabel': 'Consigli per oggi', 'adviceEngine.scopeToday': 'il resto di oggi',
+      'adviceEngine.scopeNext24': 'le prossime 24 ore',
+      'adviceEngine.notEnoughTitle': 'Dati previsionali insufficienti',
+      'adviceEngine.notEnoughDetail': 'Questo consiglio richiede dati orari non disponibili al momento.',
+      'adviceEngine.noHourly': 'Non sono disponibili previsioni orarie utilizzabili.',
+      'adviceEngine.noPrecip': 'Le previsioni non includono probabilità o quantità di precipitazioni per questa città.',
+      'adviceEngine.noTemperatures': 'Non sono disponibili temperature orarie utilizzabili.',
+      'adviceEngine.noStretch': 'Dati orari insufficienti per confrontare una parte della giornata.',
+      'adviceEngine.noDaylight': 'Temperatura oraria non disponibile nelle ore diurne.',
+      'adviceEngine.noPeriodTemp': 'Temperatura oraria non disponibile per questo periodo.',
+      'adviceEngine.notCalculated': 'Impossibile calcolare questo consiglio dalle previsioni attuali.',
+      'adviceEngine.summaryNotCalculated': 'Impossibile calcolare il riepilogo dalle previsioni attuali.',
+      'adviceEngine.umbrellaDefinitely': 'Porta sicuramente un ombrello',
+      'adviceEngine.umbrellaLikely': 'Porta un ombrello', 'adviceEngine.umbrellaUnlikely': 'Probabilmente no',
+      'adviceEngine.walkNone': 'Oggi non c’è un momento ideale',
+      'adviceEngine.walkLimited': 'Pochi dettagli per questo periodo',
+      'adviceEngine.walkReasonWind': 'c’è vento',
+      'adviceEngine.walkBest': 'Il periodo più asciutto è {window}. {reasons}',
+      'adviceEngine.walkBestPlain': 'Il periodo più asciutto è {window}.',
+      'adviceEngine.walkBut': '{detail}, ma {reasons}.',
+      'adviceEngine.carWashGood': 'Giornata ideale per lavare l’auto',
+      'adviceEngine.carWashBad': 'Oggi non è l’ideale',
+      'adviceEngine.carWashRainLater': 'È prevista pioggia{when}{amount}.',
+      'adviceEngine.carWashUnsettled': 'Sono previste condizioni umide o instabili per tutta la giornata.',
+      'adviceEngine.carWashDrySpells': 'I periodi asciutti sono troppo brevi.{hint}',
+      'adviceEngine.cyclingBad': 'Giornata poco adatta alla bici',
+      'adviceEngine.cyclingWind': 'Sono previsti venti forti di circa {wind}{when}.',
+      'adviceEngine.cyclingRain': '{amount}', 'adviceEngine.cyclingCold': 'Troppo freddo per pedalare: circa {temp}.',
+      'adviceEngine.cyclingHot': 'Molto caldo per pedalare: fino a {temp}.',
+      'adviceEngine.cyclingGood': 'Giornata adatta alla bici',
+      'adviceEngine.cyclingGoodDetail': '{temps}asciutto e con vento moderato.',
+      'adviceEngine.swimBad': 'Oggi non è l’ideale',
+      'adviceEngine.swimRain': '{amount} Meglio evitare di entrare in acqua.',
+      'adviceEngine.swimCold': 'Fresco per nuotare all’aperto: aria intorno a {temp} al massimo.',
+      'adviceEngine.swimHot': 'Aria molto calda, fino a {temp}. Cerca l’ombra tra una nuotata e l’altra.',
+      'adviceEngine.swimGood': 'Giornata ideale per nuotare all’aperto',
+      'adviceEngine.swimOvercast': 'prevalentemente nuvoloso',
+      'adviceEngine.clothingLight': 'Abiti leggeri',
+      'adviceEngine.clothingWarm': 'Caldo: circa {temp} nelle ore più calde.',
+      'adviceEngine.clothingJacketUmbrella': 'Giacca pesante e ombrello',
+      'adviceEngine.clothingJacketUmbrellaDetail': 'Freddo e piovoso: circa {temp} con pioggia prevista.',
+      'adviceEngine.clothingTShirtUmbrella': 'Tempo da maglietta, ma porta l’ombrello',
+      'adviceEngine.clothingTShirt': 'Tempo da maglietta',
+      'adviceEngine.clothingTShirtDetail': 'Caldo e asciutto{wind}.',
+      'adviceEngine.clothingTShirtWind': ' con poco vento',
+      'adviceEngine.clothingLightJacket': 'Consigliata una giacca leggera',
+      'adviceEngine.clothingLightJacketDetail': 'Mite: circa {temp}.',
+      'adviceEngine.clothingWarmJacket': 'Consigliata una giacca pesante',
+      'adviceEngine.clothingWarmJacketDetail': 'Fresco: circa {temp}.',
+      'adviceEngine.clothingCoat': 'Consigliato un cappotto invernale',
+      'adviceEngine.clothingCoatDetail': 'Freddo: circa {temp}.',
+      'adviceEngine.clothingLayers': 'Servono molti strati caldi',
+      'adviceEngine.clothingLayersDetail': 'Sotto zero: circa {temp}.',
+      'adviceEngine.uvNote': ' È consigliata la protezione solare.',
+      'adviceEngine.swingNote': ' Oggi l’escursione termica sarà di {swing}°C.',
+      'adviceEngine.windNote': ' C’è vento.', 'adviceEngine.darkNote': ' Gran parte delle ore previste sarà dopo il tramonto.',
+      'adviceEngine.breezeNote': ' È prevista una brezza leggera.',
+      'adviceEngine.tempsNote': 'Temperature intorno a {temp}. ',
+      'adviceEngine.rainWindowPeriod': 'È prevista pioggia in questo periodo.',
+      'adviceEngine.rainWindowLight': 'Possibili precipitazioni leggere in questo periodo.',
+      'adviceEngine.summarySnow': 'Neve oggi',
+      'adviceEngine.summarySnowDetail': 'È prevista neve oggi. Calcola più tempo per gli spostamenti.',
+      'adviceEngine.summaryStorm': 'Temporali previsti',
+      'adviceEngine.summaryStormDetail': 'Sono previsti temporali oggi: i programmi all’aperto potrebbero interrompersi.',
+      'adviceEngine.summaryUmbrella': 'Oggi porta un ombrello',
+      'adviceEngine.summaryCold': 'Oggi fa freddo', 'adviceEngine.summaryHot': 'Oggi fa caldo',
+      'adviceEngine.summaryGreat': 'Una splendida giornata all’aperto',
+      'adviceEngine.summaryMixed': 'Condizioni variabili oggi',
+      'adviceEngine.summaryMixedDetail': 'Sono probabili fasi di maltempo{when} durante {scope}.',
+      'adviceEngine.summaryCloudyDry': 'Nuvoloso ma asciutto oggi',
+      'adviceEngine.summaryCloudyDryDetail': 'Non è prevista pioggia; circa {temp} con {wind}.',
+      'adviceEngine.summaryVariableWinds': 'vento variabile',
+    },
+
+    es: {
+      'app.name': 'WeatherScope',
+      'app.title': 'WeatherScope - Clima y previsiones por ciudad',
+      'app.description': 'Busca el tiempo en tiempo real por ciudad o descubre lugares de todo el mundo con el clima que prefieres.',
+      'app.noscript': 'WeatherScope necesita JavaScript para consultar y mostrar datos meteorológicos en directo.',
+      'app.noscriptHint': 'Activa JavaScript en el navegador y vuelve a cargar la página.',
+      'search.searchingFor': 'Buscando "{city}"...',
+      'search.matchingLocations': '{count} ubicaciones coincidentes: selecciona una',
+      'nav.modeAria': 'Selección del modo de búsqueda', 'nav.citySearch': 'Buscar ciudad',
+      'nav.compare': 'Comparar', 'nav.climateFilter': 'Filtro climático',
+      'nav.unitAria': 'Selección de unidad de temperatura', 'nav.languageAria': 'Selección de idioma',
+      'nav.yourTime': 'Tu hora', 'nav.searchModeCity': 'Buscar ciudad',
+      'nav.searchModeCompare': 'Comparar', 'nav.searchModeClimate': 'Filtro climático',
+      'search.placeholderCity': 'Busca una ciudad (p. ej., Madrid, Tokio, Nueva York)...',
+      'search.placeholderCompare': 'Añade una ubicación para comparar (p. ej., Madrid, Oslo, El Cairo)...',
+      'search.placeholderClimate': 'Buscar clima: Soleado, Cálido, Lluvia, Nieve, > 25°C...',
+      'search.submit': 'Buscar', 'search.inputAria': 'Buscar una ciudad o una condición climática',
+      'search.clearAria': 'Borrar texto', 'search.suggestionsAria': 'Sugerencias de búsqueda',
+      'search.useLocation': 'Usar ubicación actual',
+      'climate.presetClimates': 'Climas predefinidos:', 'climate.sunny': 'Soleado',
+      'climate.cloudy': 'Nublado', 'climate.rainy': 'Lluvioso', 'climate.snowy': 'Nevado',
+      'climate.storm': 'Tormenta', 'climate.freezing': 'Helado', 'climate.cold': 'Frío',
+      'climate.cool': 'Fresco', 'climate.mild': 'Templado', 'climate.warm': 'Cálido',
+      'climate.hot': 'Caluroso', 'climate.humid': 'Húmedo', 'climate.dry': 'Seco',
+      'climate.windy': 'Ventoso', 'climate.gale': 'Temporal', 'climate.beachDay': 'Día de playa',
+      'climate.skiTrip': 'Excursión de esquí', 'climate.tropical': 'Tropical',
+      'climate.mildBreezy': 'Templado y con brisa', 'climate.rainyMild': 'Lluvioso y templado',
+      'climate.resultsTitle': 'Ciudades con condiciones climáticas adecuadas',
+      'climate.resultsAria': 'Ciudades coincidentes', 'climate.foundOne': '{count} ciudad encontrada',
+      'climate.foundMany': '{count} ciudades encontradas',
+      'climate.clickToExplore': 'Selecciona una ciudad para explorar el tiempo en directo y la previsión de 7 días.',
+      'climate.sortLabel': 'Ordenar:', 'climate.sortNameAsc': 'Nombre de ciudad (A-Z)',
+      'climate.sortNameDesc': 'Nombre de ciudad (Z-A)', 'climate.sortTemperature': 'Temperatura',
+      'climate.sortHumidity': 'Humedad', 'climate.sortWind': 'Velocidad del viento',
+      'climate.sortHighToLow': '{label} (de mayor a menor)',
+      'climate.sortLowToHigh': '{label} (de menor a mayor)',
+      'climate.resultsSubtitle': 'Se han buscado {count} ciudades de referencia en todo el mundo. Selecciona una para explorar el tiempo en directo y la previsión de 7 días.',
+      'climate.emptyTitle': 'Ninguna de las {count} ciudades de referencia coincide exactamente con estos criterios climáticos.',
+      'climate.emptyHint': 'Prueba una condición más general, como "Soleado", "Cálido" o "Nublado".',
+      'climate.viewDetails': 'Ver detalles del tiempo', 'climate.cardHumidityTitle': 'Humedad relativa',
+      'climate.cardWindTitle': 'Velocidad del viento', 'climate.discovery': 'Explorar el clima',
+      'climate.backToMatching': 'Volver a las ciudades coincidentes ({count})',
+      'climate.searchWorldwide': 'Buscar ciudades de todo el mundo que coincidan con "{query}" →',
+      'climate.searching': 'Buscando ciudades con el clima seleccionado...',
+      'climate.errorTitle': 'Error en la búsqueda climática',
+      'climate.errorBody': 'No se pudieron obtener los datos meteorológicos globales. Inténtalo de nuevo.',
+      'state.fetching': 'Obteniendo datos meteorológicos en directo...',
+      'state.fetchingCity': 'Obteniendo el tiempo en directo para {city}...',
+      'state.errorTitle': 'No hay resultados coincidentes',
+      'state.errorBody': 'No se pudieron obtener resultados. Ajusta los criterios e inténtalo de nuevo.',
+      'state.retry': 'Probar otra búsqueda', 'state.backToResults': 'Volver a los resultados climáticos',
+      'state.weatherUnavailableTitle': 'Datos meteorológicos no disponibles',
+      'state.weatherUnavailableBody': 'No se pudo obtener el tiempo de "{city}". Comprueba la conexión e inténtalo de nuevo.',
+      'state.cityNotFoundTitle': 'Ciudad no encontrada',
+      'state.cityNotFoundBody': 'No hay resultados para "{city}". Prueba otra forma de escribirlo o añade el país.',
+      'state.searchFailedTitle': 'Error en la búsqueda',
+      'state.searchTimedOut': 'La búsqueda ha agotado el tiempo. Comprueba la conexión e inténtalo de nuevo.',
+      'state.searchFailed': 'Se produjo un error al buscar la ciudad. Inténtalo de nuevo.',
+      'geo.button': 'Usar ubicación actual', 'geo.detecting': 'Detectando tu ubicación...',
+      'geo.unsupportedTitle': 'Geolocalización no compatible',
+      'geo.unsupported': 'Tu navegador no permite detectar la ubicación automáticamente.',
+      'geo.deniedTitle': 'Acceso a la ubicación denegado',
+      'geo.denied': 'No se pudo obtener tu ubicación. Revisa los permisos o busca la ciudad directamente.',
+      'geo.myLocation': 'Mi ubicación',
+      'compare.heading': 'Comparar ubicaciones', 'compare.count': '{selected} de {max} seleccionadas',
+      'compare.subtitle': 'Busca arriba o elige una ciudad popular y compara entre 2 y 4 lugares.',
+      'compare.addLocation': 'Añadir ubicación', 'compare.run': 'Comparar',
+      'compare.clearAll': 'Borrar todo', 'compare.loading': 'Comparando el tiempo...',
+      'compare.glanceHeading': 'El tiempo de un vistazo',
+      'compare.legendHigh': 'Valor más alto de la fila', 'compare.legendLow': 'Valor más bajo de la fila',
+      'compare.currentHeading': 'Condiciones actuales',
+      'compare.forecastHeading': 'Comparación de la previsión de hoy',
+      'compare.forecastSubtitle': 'Máximas, mínimas, probabilidad de lluvia y valores máximos',
+      'compare.metricHead': 'Métrica', 'compare.locationSlot': 'Ubicación {slot}',
+      'compare.locationSlotEmpty': 'Ubicación {slot} — usa la búsqueda o una ciudad popular',
+      'compare.add': 'Añadir', 'compare.moveEarlier': 'Mover antes',
+      'compare.moveLater': 'Mover después', 'compare.removeCity': 'Quitar {city} de la comparación',
+      'compare.clearSlot': 'Borrar esta ubicación', 'compare.unknownLocation': 'Ubicación desconocida',
+      'compare.selectedLocation': 'Ubicación seleccionada', 'compare.locationFallback': 'Ubicación',
+      'compare.weatherUnavailable': 'Tiempo no disponible', 'compare.tryAgain': 'Intentar de nuevo',
+      'compare.highest': 'más alto', 'compare.lowest': 'más bajo',
+      'compare.freshness': 'Última lectura: {label}',
+      'compare.needTwoLocations': 'Se necesitan al menos dos ubicaciones con datos en directo para comparar.',
+      'compare.verySimilar': 'Estas ubicaciones son muy parecidas; no destaca ninguna diferencia.',
+      'compare.duplicate': '{city} ya está en la comparación.',
+      'compare.listFull': 'Puedes comparar hasta {max} ubicaciones. Quita una para añadir otra.',
+      'compare.couldNotAdd': 'No se pudo añadir esa ubicación a la comparación.',
+      'compare.changeLocation': '{city}, {meta}. Cambiar esta ubicación.',
+      'compare.retryAria': 'Volver a cargar el tiempo de {city}',
+      'compare.thisLocation': 'esta ubicación',
+      'compare.ariaExtreme': '{value}, {word} de las ubicaciones comparadas',
+      'compare.ariaExtremeTitle': '{word} para {row}',
+      'compare.replacing': 'Elige una ubicación nueva para la posición {slot} (ahora {city}). Pulsa Escape para cancelar.',
+      'compare.noResults': 'No hay resultados para "{query}". Prueba otra escritura o añade el país.',
+      'compare.searchTimedOut': 'La búsqueda de ubicaciones ha agotado el tiempo. Comprueba la conexión e inténtalo de nuevo.',
+      'compare.searchFailed': 'No se pudo buscar la ubicación. Inténtalo de nuevo.',
+      'compare.locationZone': 'Zona horaria local {zone}, {diff}',
+      'glance.heading': 'Hoy de un vistazo', 'glance.feelsLike': 'Sensación térmica',
+      'glance.verdictLabel': 'El pronóstico de hoy:', 'glance.whatToWear': 'Qué ponerse:',
+      'hero.feelsLike': 'Sensación térmica', 'hero.shareAria': 'Compartir el tiempo',
+      'hero.refreshAria': 'Actualizar datos meteorológicos', 'metrics.aria': 'Métricas meteorológicas clave',
+      'metrics.heading': 'Condiciones actuales', 'metrics.humidity': 'Humedad',
+      'metrics.wind': 'Viento', 'metrics.uvIndex': 'Índice UV', 'metrics.pressure': 'Presión',
+      'metrics.precipitation': 'Precipitaciones', 'metrics.localTime': 'Hora local',
+      'metrics.sunriseSunset': 'Amanecer y atardecer', 'metrics.sunrise': 'Amanecer',
+      'metrics.sunset': 'Atardecer', 'metrics.cloudCover': 'Nubosidad: {value}%',
+      'metrics.humidityDry': 'Ambiente seco', 'metrics.humidityComfortable': 'Humedad agradable',
+      'metrics.humidityHigh': 'Humedad alta', 'metrics.pressureNormal': 'Presión normal',
+      'metrics.pressureHigh': 'Alta presión', 'metrics.pressureLow': 'Baja presión',
+      'metrics.uvLow': 'Bajo', 'metrics.uvModerate': 'Moderado', 'metrics.uvHigh': 'Alto',
+      'metrics.uvVeryHigh': 'Muy alto', 'metrics.uvExtreme': 'Extremo',
+      'metrics.uvAdviceLow': 'Riesgo bajo de daño solar',
+      'metrics.uvAdviceModerate': 'Se recomienda protección solar',
+      'metrics.uvAdviceHigh': 'Usa sombrero y protector solar',
+      'metrics.uvAdviceVeryHigh': 'Evita el sol al mediodía',
+      'metrics.uvAdviceExtreme': 'Toma todas las precauciones frente al sol',
+      'forecast.hourlyHeading': 'Previsión de 24 horas', 'forecast.hourlySubtitle': 'Previsión horaria local ·',
+      'forecast.dailyHeading': 'Previsión de 7 días', 'forecast.dailySubtitle': 'Próximos días ·',
+      'forecast.cityTime': 'hora local', 'forecast.hourlyAria': 'Previsión meteorológica por horas',
+      'forecast.now': 'Ahora', 'forecast.today': 'Hoy', 'forecast.maxUvTitle': 'Índice UV máximo',
+      'forecast.precipChanceTitle': 'Probabilidad de precipitaciones',
+      'popular.label': 'Populares:', 'footer.providedBy': 'Datos proporcionados por {link}',
+      'footer.tagline': 'Información meteorológica global en tiempo real',
+      'footer.timezoneNote': 'Las horas locales usan la zona IANA de cada ciudad y se actualizan en tiempo real · Tu zona de referencia es {zone}',
+      'time.sameAsYou': 'La misma hora que tú', 'time.sameAsYouShort': 'Misma hora',
+      'time.aheadOf': '{value} por delante de ti', 'time.behind': '{value} por detrás de ti',
+      'time.detectedZone': 'Zona horaria detectada: {zone}',
+      'time.localTimeAria': 'Tu hora local, detectada mediante la zona horaria {zone}',
+      'time.youClock': 'Tú {time}', 'time.yourZoneTitle': 'Tu zona horaria: {zone}',
+      'time.allTimesIn': 'Todas las horas en {zone}', 'nav.detectedLocation': 'Ubicación detectada',
+      'nav.yourIP': 'Tu IP', 'nav.countryCity': '{country}, {city}',
+      'time.offsetVsYou': 'Diferencia respecto a ti ({zone}): {value}',
+      'time.freshnessNow': 'Actualizado ahora', 'time.freshnessMinutes': 'Actualizado hace {count} min',
+      'time.freshnessHours': 'Actualizado hace {count} hora', 'time.freshnessHoursPlural': 'Actualizado hace {count} horas',
+      'time.freshnessDays': 'Actualizado hace {count} día', 'time.freshnessDaysPlural': 'Actualizado hace {count} días',
+      'share.forecast': 'Previsión compartida', 'share.showAllCards': 'Mostrar todas las tarjetas',
+      'share.button': 'Compartir el tiempo', 'share.weatherIn': 'El tiempo en {place}',
+      'share.rain': '{value}% de lluvia', 'share.high': 'Máxima {value}', 'share.low': 'Mínima {value}',
+      'share.copied': 'Enlace copiado. Al abrirlo se mostrará {place} con las tarjetas compartidas.',
+      'share.copyFailedInBar': 'No se pudo copiar automáticamente. El enlace de {place} está en la barra de direcciones.',
+      'share.copyFailed': 'No se pudo copiar automáticamente. Copia el enlace de la barra de direcciones para compartir esta previsión.',
+      'wmo.0': 'Cielo despejado', 'wmo.1': 'Mayormente despejado', 'wmo.2': 'Parcialmente nuboso',
+      'wmo.3': 'Cubierto', 'wmo.45': 'Niebla', 'wmo.48': 'Niebla engelante',
+      'wmo.51': 'Llovizna ligera', 'wmo.53': 'Llovizna moderada', 'wmo.55': 'Llovizna intensa',
+      'wmo.56': 'Llovizna engelante', 'wmo.57': 'Llovizna engelante intensa',
+      'wmo.61': 'Lluvia ligera', 'wmo.63': 'Lluvia moderada', 'wmo.65': 'Lluvia intensa',
+      'wmo.66': 'Lluvia engelante', 'wmo.67': 'Lluvia engelante intensa',
+      'wmo.71': 'Nevada ligera', 'wmo.73': 'Nevada moderada', 'wmo.75': 'Nevada intensa',
+      'wmo.77': 'Granos de nieve', 'wmo.80': 'Chubascos ligeros', 'wmo.81': 'Chubascos moderados',
+      'wmo.82': 'Chubascos violentos', 'wmo.85': 'Chubascos de nieve', 'wmo.86': 'Fuertes chubascos de nieve',
+      'wmo.95': 'Tormenta', 'wmo.96': 'Tormenta con granizo', 'wmo.99': 'Tormenta fuerte con granizo',
+      'wmo.unknown': 'Despejado',
+      'glanceEngine.storm': 'Se esperan tormentas', 'glanceEngine.snow': 'Hoy nevará',
+      'glanceEngine.freezing': 'Frío glacial', 'glanceEngine.hot': 'Mucho calor',
+      'glanceEngine.umbrella': 'Se recomienda llevar paraguas', 'glanceEngine.gale': 'Mucho viento',
+      'glanceEngine.good': 'Buen tiempo', 'glanceEngine.around': ' alrededor de las {time}',
+      'glanceEngine.at': ' a las {time}',
+      'glanceEngine.detailStorm': 'Se prevén tormentas{when}; podrían interrumpir los planes al aire libre.',
+      'glanceEngine.detailSnow': 'Se espera nieve{when}; reserva más tiempo para desplazarte.',
+      'glanceEngine.detailFreezing': 'Sensación térmica de {temp}{when}; necesitarás ropa de abrigo.',
+      'glanceEngine.detailHot': 'Sensación térmica de {temp}{when}; busca la sombra y bebe agua.',
+      'glanceEngine.detailRainNow': 'Está lloviendo ahora ({amount} en la última hora).',
+      'glanceEngine.detailRainNowShort': 'Está lloviendo ahora.',
+      'glanceEngine.detailRainPeak': 'La lluvia alcanzará su punto máximo en {value}{when}.',
+      'glanceEngine.detailLightPrecip': 'Hoy se esperan precipitaciones ligeras.',
+      'glanceEngine.detailWinds': 'Hoy el viento alcanzará {value}; hará bastante viento.',
+      'glanceEngine.detailVeryWindy': 'Hoy hará mucho viento.',
+      'glanceEngine.detailMostlyDry': 'Mayormente seco', 'glanceEngine.detailDry': 'Seco',
+      'glanceEngine.detailComfortable': 'y agradable, alrededor de {value}',
+      'glanceEngine.detailWithWind': 'con {value}', 'glanceEngine.windLight': 'viento ligero',
+      'glanceEngine.windBreeze': 'una brisa', 'glanceEngine.windStrong': 'viento fuerte',
+      'glanceEngine.windVeryStrong': 'viento muy fuerte', 'glanceEngine.metricRain': 'Lluvia',
+      'glanceEngine.metricWind': 'Viento', 'glanceEngine.metricHumidity': 'Humedad',
+      'glanceEngine.hintPeakToday': 'probabilidad máxima de hoy', 'glanceEngine.hintNotReported': 'sin datos',
+      'glanceEngine.hintRelativeHumidity': 'humedad relativa',
+      'compareEngine.metricCondition': 'Tiempo', 'compareEngine.metricTemperature': 'Temperatura',
+      'compareEngine.metricApparent': 'Sensación térmica', 'compareEngine.metricRainChance': 'Probabilidad de lluvia',
+      'compareEngine.metricWind': 'Viento', 'compareEngine.metricPressure': 'Presión',
+      'compareEngine.metricCloudCover': 'Nubosidad', 'compareEngine.metricSun': 'Amanecer / atardecer',
+      'compareEngine.metricPrecipitation': 'Precipitaciones', 'compareEngine.metricUv': 'Índice UV',
+      'compareEngine.metricMaxUv': 'UV máximo', 'compareEngine.metricMaxWind': 'Viento máximo',
+      'compareEngine.warmer': 'más cálido', 'compareEngine.cooler': 'más fresco',
+      'compareEngine.insightTemperature': 'En {city} hace {gap} {word} que en {other}.',
+      'compareEngine.insightApparent': 'La sensación térmica en {city} es {gap} {word} que en {other}.',
+      'compareEngine.insightRain': '{city} tiene menos probabilidad de lluvia ({low} frente a {high}).',
+      'compareEngine.insightWind': 'El viento en {city} es {gap} más fuerte que en {other}.',
+      'compareEngine.insightPressure': 'La presión en {city} es {gap} más alta que en {other}.',
+      'compareEngine.insightCloud': 'En {city} hay {gap} más nubosidad que en {other}.',
+      'compareEngine.insightSun': 'El sol sale {gap} antes en {city} que en {other}.',
+      'compareEngine.insightPrecip': 'En {city} hay {gap} precipitaciones más que en {other}.',
+      'compareEngine.insightUv': 'El índice UV en {city} es {gap} más alto que en {other}.',
+      'compareEngine.insightMaxUv': 'El índice UV máximo de hoy en {city} es {gap} más alto que en {other}.',
+      'compareEngine.insightMaxWind': 'El viento más fuerte de hoy en {city} es {gap} más rápido que en {other}.',
+      'compareEngine.gapWarmer': ' más cálido', 'compareEngine.gapCooler': ' más fresco',
+      'compareEngine.gapStronger': ' más fuerte', 'compareEngine.gapHigher': ' más alto',
+      'compareEngine.gapCloudier': ' más nuboso', 'compareEngine.gapEarlier': ' antes',
+      'compareEngine.gapMore': ' más', 'compareEngine.gapFaster': ' más rápido',
+      'assistant.heading': 'Consejos para hoy', 'assistant.scopeToday': 'Según lo que queda del día',
+      'assistant.scopeNext24': 'Según las próximas 24 horas', 'assistant.preparing': 'Preparando tu previsión…',
+      'assistant.windowTitle': '¿Lloverá durante…?', 'assistant.windowTitlePlain': '¿Lloverá durante...?',
+      'adviceEngine.windowMorning': 'Mañana', 'adviceEngine.windowMidday': 'Mediodía',
+      'adviceEngine.windowAfternoon': 'Tarde', 'adviceEngine.windowEvening': 'Noche',
+      'adviceEngine.phraseMorning': 'la mañana', 'adviceEngine.phraseMidday': 'las horas del mediodía',
+      'adviceEngine.phraseAfternoon': 'la tarde', 'adviceEngine.phraseEvening': 'la noche',
+      'adviceEngine.tileUmbrella': 'Paraguas', 'adviceEngine.tileWalk': 'Paseo',
+      'adviceEngine.tileCarWash': 'Lavar el coche', 'adviceEngine.tileCycling': 'Ciclismo',
+      'adviceEngine.tileSwimming': 'Natación', 'adviceEngine.tileClothing': 'Qué ponerse',
+      'adviceEngine.summaryLabel': 'Consejos para hoy', 'adviceEngine.scopeToday': 'lo que queda de hoy',
+      'adviceEngine.scopeNext24': 'las próximas 24 horas',
+      'adviceEngine.notEnoughTitle': 'No hay suficientes datos de previsión',
+      'adviceEngine.notEnoughDetail': 'Este consejo necesita datos horarios que no están disponibles ahora.',
+      'adviceEngine.noHourly': 'No hay datos horarios utilizables.',
+      'adviceEngine.noPrecip': 'La previsión de esta ciudad no incluye probabilidad ni cantidad de precipitación.',
+      'adviceEngine.noTemperatures': 'No hay temperaturas horarias utilizables.',
+      'adviceEngine.noStretch': 'No hay suficientes temperaturas horarias para comparar un tramo del día.',
+      'adviceEngine.noDaylight': 'No hay temperatura horaria disponible durante las horas de luz.',
+      'adviceEngine.noPeriodTemp': 'No hay temperatura horaria disponible para este periodo.',
+      'adviceEngine.notCalculated': 'No se pudo calcular este consejo con la previsión actual.',
+      'adviceEngine.summaryNotCalculated': 'No se pudo calcular este resumen con la previsión actual.',
+      'adviceEngine.umbrellaDefinitely': 'Lleva un paraguas sin falta',
+      'adviceEngine.umbrellaLikely': 'Lleva un paraguas', 'adviceEngine.umbrellaUnlikely': 'Probablemente no',
+      'adviceEngine.walkNone': 'Hoy no hay un periodo ideal',
+      'adviceEngine.walkLimited': 'Hay pocos detalles para este periodo',
+      'adviceEngine.walkReasonWind': 'hace viento',
+      'adviceEngine.walkBest': 'El intervalo más seco es {window}. {reasons}',
+      'adviceEngine.walkBestPlain': 'El intervalo más seco es {window}.',
+      'adviceEngine.walkBut': '{detail}, pero {reasons}.',
+      'adviceEngine.carWashGood': 'Buen día para lavar el coche',
+      'adviceEngine.carWashBad': 'Hoy no es buen día',
+      'adviceEngine.carWashRainLater': 'Se espera lluvia{when}{amount}.',
+      'adviceEngine.carWashUnsettled': 'Se esperan condiciones húmedas o inestables durante todo el día.',
+      'adviceEngine.carWashDrySpells': 'Los periodos secos son demasiado cortos.{hint}',
+      'adviceEngine.cyclingBad': 'Hoy no es ideal para ir en bici',
+      'adviceEngine.cyclingWind': 'Se esperan vientos fuertes de unos {wind}{when}.',
+      'adviceEngine.cyclingRain': '{amount}', 'adviceEngine.cyclingCold': 'Hace demasiado frío para pedalear: unos {temp}.',
+      'adviceEngine.cyclingHot': 'Hace mucho calor para pedalear: hasta {temp}.',
+      'adviceEngine.cyclingGood': 'Buen día para ir en bici',
+      'adviceEngine.cyclingGoodDetail': '{temps}seco y con vientos relativamente suaves.',
+      'adviceEngine.swimBad': 'Hoy no es ideal',
+      'adviceEngine.swimRain': '{amount} Mejor no meterse en el agua.',
+      'adviceEngine.swimCold': 'Fresco para nadar al aire libre: como mucho, unos {temp}.',
+      'adviceEngine.swimHot': 'Aire muy cálido, hasta {temp}. Busca la sombra entre baños.',
+      'adviceEngine.swimGood': 'Buen tiempo para nadar al aire libre',
+      'adviceEngine.swimOvercast': 'mayormente cubierto',
+      'adviceEngine.clothingLight': 'Ropa ligera',
+      'adviceEngine.clothingWarm': 'Cálido: unos {temp} en las horas más calurosas.',
+      'adviceEngine.clothingJacketUmbrella': 'Chaqueta de abrigo y paraguas',
+      'adviceEngine.clothingJacketUmbrellaDetail': 'Frío y lluvioso: unos {temp} y se espera lluvia.',
+      'adviceEngine.clothingTShirtUmbrella': 'Tiempo de camiseta, pero lleva paraguas',
+      'adviceEngine.clothingTShirt': 'Tiempo de camiseta',
+      'adviceEngine.clothingTShirtDetail': 'Cálido y seco{wind}.',
+      'adviceEngine.clothingTShirtWind': ' con poco viento',
+      'adviceEngine.clothingLightJacket': 'Se recomienda una chaqueta ligera',
+      'adviceEngine.clothingLightJacketDetail': 'Templado: unos {temp}.',
+      'adviceEngine.clothingWarmJacket': 'Se recomienda una chaqueta de abrigo',
+      'adviceEngine.clothingWarmJacketDetail': 'Fresco: unos {temp}.',
+      'adviceEngine.clothingCoat': 'Se recomienda un abrigo de invierno',
+      'adviceEngine.clothingCoatDetail': 'Frío: unos {temp}.',
+      'adviceEngine.clothingLayers': 'Necesitarás varias capas de abrigo',
+      'adviceEngine.clothingLayersDetail': 'Bajo cero: unos {temp}.',
+      'adviceEngine.uvNote': ' Se recomienda protección solar.',
+      'adviceEngine.swingNote': ' Hoy habrá una variación de {swing}°C.',
+      'adviceEngine.windNote': ' Hace viento.', 'adviceEngine.darkNote': ' La mayor parte del periodo previsto será de noche.',
+      'adviceEngine.breezeNote': ' Se espera una brisa ligera.',
+      'adviceEngine.tempsNote': 'Temperaturas de unos {temp}. ',
+      'adviceEngine.rainWindowPeriod': 'Se espera lluvia durante este periodo.',
+      'adviceEngine.rainWindowLight': 'Es posible que haya precipitaciones ligeras durante este periodo.',
+      'adviceEngine.summarySnow': 'Hoy nevará',
+      'adviceEngine.summarySnowDetail': 'Se espera nieve hoy. Reserva más tiempo para desplazarte.',
+      'adviceEngine.summaryStorm': 'Se esperan tormentas',
+      'adviceEngine.summaryStormDetail': 'Se esperan tormentas hoy; podrían interrumpir los planes al aire libre.',
+      'adviceEngine.summaryUmbrella': 'Lleva paraguas hoy',
+      'adviceEngine.summaryCold': 'Hoy hace frío', 'adviceEngine.summaryHot': 'Hoy hace calor',
+      'adviceEngine.summaryGreat': 'Un día estupendo para estar al aire libre',
+      'adviceEngine.summaryMixed': 'Tiempo variable hoy',
+      'adviceEngine.summaryMixedDetail': 'Es probable que haya intervalos inestables{when} durante {scope}.',
+      'adviceEngine.summaryCloudyDry': 'Hoy estará nublado pero seco',
+      'adviceEngine.summaryCloudyDryDetail': 'No se espera lluvia; unos {temp} y {wind}.',
+      'adviceEngine.summaryVariableWinds': 'vientos variables',
+    },
   };
 
   // ==========================================================================
@@ -1616,7 +2181,7 @@
         const english = translations[DEFAULT_LANG][key];
         if (typeof english !== 'string') continue;
         if (current !== DEFAULT_LANG) {
-          const translated = translations[current][key];
+          const translated = translations[current] && translations[current][key];
           if (typeof translated === 'string') {
             node[property] = interpolate(translated, readVars(node));
             continue;
@@ -1713,8 +2278,8 @@
   // --------------------------------------------------------------------------
   // Race several independent, key-free HTTPS endpoints and take the first
   // answer. All of them are CORS-enabled and none may block the page: the whole
-  // lookup is bounded by GEO_TIMEOUT and a failure simply falls through to the
-  // browser's own language preference.
+  // lookup is bounded by GEO_TIMEOUT. An unsupported country or failed lookup
+  // uses English; browser locale and timezone do not override the IP result.
   // ==========================================================================
   const GEO_TIMEOUT = 5000;
 
@@ -1821,12 +2386,10 @@
   /**
    * Resolve the language for a first-time visitor.
    *
-   * Order: `?lang=` -> stored choice -> IP country -> browser languages ->
-   * device timezone -> English. The IP step races the key-free HTTPS endpoints
-   * and takes the first one that actually answers; a failed, blocked, or
-   * slow lookup simply falls through to the browser's own preference. An IP
-   * country that has no supported language (anything outside the map) counts
-   * as "no answer" so step 4 gets its turn.
+   * Order: `?lang=` -> stored choice -> IP country dictionary -> English.
+   * The IP step races the key-free HTTPS endpoints and takes the first country
+   * result (preferring one that also includes IP and city). A country without
+   * a matching dictionary and a failed lookup both fall back to English.
    * Returns the language *and* how it was found, so callers can explain a
    * choice instead of silently overriding it.
    */
@@ -1838,20 +2401,20 @@
     return raceIpLanguage()
       .then((info) => preferred
         ? { ...info, lang: preferred, source: preferredSource }
-        : { ...info, lang: info.lang || detectBrowserLang() || detectTimeZoneLang() || DEFAULT_LANG, source: info.lang ? 'ip' : 'browser' })
+        : { ...info, lang: info.lang || DEFAULT_LANG, source: info.lang ? 'ip' : 'default' })
       .catch(() => preferred
         ? { lang: preferred, source: preferredSource, ip: null, city: null, country: null }
         : fallbackLang());
   }
 
   /**
-   * Prefer a complete IP/city response, then fall back to the best country/IP response.
+   * Prefer a complete IP/city response, then fall back to any valid country response.
    *
    * Every attempt is consumed by exactly one branch, so a slow or blocked
    * endpoint can never leave an unhandled rejection behind - which would have
    * logged a scary error on every page load for anyone whose fourth provider
    * is rate-limiting.
-   * Returns { lang, ip, city, country } or throws.
+   * Returns { lang, ip, city, country } or throws when all providers fail.
    */
   function raceIpLanguage() {
     const attempts = GEO_ENDPOINTS.map((endpoint) => fetchGeoInfo(endpoint).then((info) => {
@@ -1865,14 +2428,13 @@
       if (!info.ip || !info.city || !info.country) throw new Error('incomplete geo result');
       return info;
     }));
-    if (typeof Promise.any === 'function') {
-      return Promise.any(complete);
-    }
+    return firstFulfilled(complete).catch(() => firstFulfilled(attempts));
+  }
 
-    // Promise.any is missing on older Safari / Firefox / Edge: emulate it, but
-    // hand the caller the winning *value*, never the settled result object.
+  function firstFulfilled(promises) {
+    if (typeof Promise.any === 'function') return Promise.any(promises);
     if (typeof Promise.allSettled === 'function') {
-      return Promise.allSettled(complete).then((results) => {
+      return Promise.allSettled(promises).then((results) => {
         const hit = results.find((result) => result.status === 'fulfilled');
         if (!hit) throw new Error('geo unavailable');
         return hit.value;
@@ -1881,12 +2443,8 @@
     return Promise.reject(new Error('geo unavailable'));
   }
 
-  /** When no IP answer arrives: browser language, then timezone, then English. */
+  /** An unavailable IP lookup always uses the English default. */
   function fallbackLang() {
-    const browser = detectBrowserLang();
-    if (browser) return { lang: browser, source: 'browser', ip: null, city: null, country: null };
-    const zone = detectTimeZoneLang();
-    if (zone) return { lang: zone, source: 'timezone', ip: null, city: null, country: null };
     return { lang: DEFAULT_LANG, source: 'default', ip: null, city: null, country: null };
   }
 
@@ -1899,7 +2457,8 @@
 
   /** Condition label for a WMO code, in the active language. */
   function conditionLabel(code) {
-    const key = translations[current][`wmo.${code}`];
+    const active = translations[current] || translations[DEFAULT_LANG];
+    const key = active[`wmo.${code}`];
     return typeof key === 'string' ? key : t('wmo.unknown');
   }
 
