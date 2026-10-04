@@ -1707,7 +1707,7 @@
     {
       url: 'https://www.cloudflare.com/cdn-cgi/trace',
       parse: (body) => {
-        const match = /(?:^|\n)loc=([A-Za-z]{2})(?:\n|$)/.exec(body);
+        const match = /(?:^|\r?\n)loc\s*=\s*([A-Za-z]{2})(?:\r?\n|$)/i.exec(body);
         return match ? match[1].toUpperCase() : null;
       },
     },
@@ -1732,6 +1732,13 @@
         return data ? data.country : null;
       },
     },
+    {
+      url: 'https://ipinfo.io/json',
+      parse: (body) => {
+        const data = JSON.parse(body);
+        return data && data.country ? data.country : null;
+      },
+    },
   ];
 
   function fetchCountry(endpoint) {
@@ -1739,16 +1746,20 @@
       ? win.fetch.bind(win)
       : (typeof fetch === 'function' ? fetch : null);
     if (!fetchImpl) return Promise.reject(new Error('fetch unavailable'));
-    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+
+    const hasAbortController = typeof AbortController === 'function';
+    const controller = hasAbortController ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), GEO_TIMEOUT) : null;
 
-    return fetchImpl(endpoint.url, {
+    const opts = {
       method: 'GET',
       mode: 'cors',
       credentials: 'omit',
       cache: 'no-store',
-      signal: controller ? controller.signal : undefined,
-    })
+    };
+    if (controller) opts.signal = controller.signal;
+
+    const fetchPromise = fetchImpl(endpoint.url, opts)
       .then((response) => {
         if (!response || !response.ok) throw new Error('geo request failed');
         return response.text();
@@ -1757,10 +1768,20 @@
         const code = endpoint.parse(body);
         if (!code) throw new Error('geo response unparseable');
         return langForCountry(code);
-      })
-      .finally(() => {
+      });
+
+    if (!hasAbortController) {
+      return Promise.race([
+        fetchPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('geo timeout')), GEO_TIMEOUT)),
+      ]).finally(() => {
         if (timer) clearTimeout(timer);
       });
+    }
+
+    return fetchPromise.finally(() => {
+      if (timer) clearTimeout(timer);
+    });
   }
 
   /**
