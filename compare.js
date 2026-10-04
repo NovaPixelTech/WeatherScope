@@ -251,6 +251,12 @@
     return Object.assign({}, DEFAULT_FORMAT, format || {});
   }
 
+  function translate(format, key, vars, fallback) {
+    return format && typeof format.t === 'function'
+      ? format.t(key, vars, fallback)
+      : fallback;
+  }
+
   // ==========================================================================
   // Metric definitions
   // --------------------------------------------------------------------------
@@ -265,7 +271,7 @@
   const CURRENT_METRICS = [
     {
       key: 'condition',
-      label: 'Weather',
+      label: 'Weather', i18nKey: 'compareEngine.metricCondition',
       icon: '⛅',
       kind: 'text',
       read: (entry) => (entry.current ? entry.current.weather_code : null),
@@ -275,7 +281,7 @@
     },
     {
       key: 'temperature',
-      label: 'Temperature',
+      label: 'Temperature', i18nKey: 'compareEngine.metricTemperature',
       icon: '🌡️',
       kind: 'number',
       unit: 'temp',
@@ -283,22 +289,22 @@
       text: (entry, format) => format.temp(entry.current.temperature_2m),
       // "Athens is 10°C warmer than Gütersloh."
       insight: (high, low, diff, format) =>
-        `${cityLabel(high.city)} is ${format.tempGap(diff)} ${diff > 0 ? 'warmer' : 'cooler'} than ${cityLabel(low.city)}.`,
+        translate(format, 'compareEngine.insightTemperature', { city: cityLabel(high.city), gap: format.tempGap(diff), word: translate(format, diff > 0 ? 'compareEngine.gapWarmer' : 'compareEngine.gapCooler', null, diff > 0 ? 'warmer' : 'cooler'), other: cityLabel(low.city) }, `${cityLabel(high.city)} is ${format.tempGap(diff)} ${diff > 0 ? 'warmer' : 'cooler'} than ${cityLabel(low.city)}.`),
     },
     {
       key: 'apparent',
-      label: 'Feels like',
+      label: 'Feels like', i18nKey: 'compareEngine.metricApparent',
       icon: '🤗',
       kind: 'number',
       unit: 'temp',
       read: (entry) => (entry.current ? entry.current.apparent_temperature : null),
       text: (entry, format) => format.temp(entry.current.apparent_temperature),
       insight: (high, low, diff, format) =>
-        `It feels ${format.tempGap(diff)} ${diff > 0 ? 'warmer' : 'cooler'} in ${cityLabel(high.city)} than in ${cityLabel(low.city)}.`,
+        translate(format, 'compareEngine.insightApparent', { gap: format.tempGap(diff), word: translate(format, diff > 0 ? 'compareEngine.gapWarmer' : 'compareEngine.gapCooler', null, diff > 0 ? 'warmer' : 'cooler'), city: cityLabel(high.city), other: cityLabel(low.city) }, `It feels ${format.tempGap(diff)} ${diff > 0 ? 'warmer' : 'cooler'} in ${cityLabel(high.city)} than in ${cityLabel(low.city)}.`),
     },
     {
       key: 'rainChance',
-      label: 'Rain chance',
+      label: 'Rain chance', i18nKey: 'compareEngine.metricRainChance',
       icon: '☔',
       kind: 'number',
       unit: 'percent',
@@ -307,66 +313,66 @@
       // Phrased against the *lower* probability - "who stays drier" is a fact,
       // not a judgement.
       insight: (high, low, diff, format) =>
-        `${cityLabel(low.city)} has the lower chance of rain (${format.percent(low.value)} vs ${format.percent(high.value)}).`,
+        translate(format, 'compareEngine.insightRain', { city: cityLabel(low.city), low: format.percent(low.value), high: format.percent(high.value) }, `${cityLabel(low.city)} has the lower chance of rain (${format.percent(low.value)} vs ${format.percent(high.value)}).`),
     },
     {
       key: 'wind',
-      label: 'Wind',
+      label: 'Wind', i18nKey: 'compareEngine.metricWind',
       icon: '💨',
       kind: 'number',
       unit: 'wind',
       read: (entry) => (entry.current ? entry.current.wind_speed_10m : null),
       text: (entry, format) => format.wind(entry.current.wind_speed_10m),
       insight: (high, low, diff, format) =>
-        `Wind is ${format.windGap(diff)} ${getWindUnitSymbol(format)} stronger in ${cityLabel(high.city)} than in ${cityLabel(low.city)}.`,
+        translate(format, 'compareEngine.insightWind', { gap: format.windGap(diff), city: cityLabel(high.city), other: cityLabel(low.city) }, `Wind is ${format.windGap(diff)} ${getWindUnitSymbol(format)} stronger in ${cityLabel(high.city)} than in ${cityLabel(low.city)}.`),
     },
     {
       key: 'uv',
-      label: 'UV index',
+      label: 'UV index', i18nKey: 'compareEngine.metricUv',
       icon: '☀️',
       kind: 'number',
       unit: 'uv',
       read: (entry) => (entry.current ? entry.current.uv_index : null),
       text: (entry, format) => format.uv(entry.current.uv_index),
       insight: (high, low) =>
-        `The UV index is higher in ${cityLabel(high.city)} (${high.value.toFixed(1)} vs ${low.value.toFixed(1)}).`,
+        translate(format, 'compareEngine.insightUv', { gap: (high.value - low.value).toFixed(1), city: cityLabel(high.city), other: cityLabel(low.city) }, `The UV index is higher in ${cityLabel(high.city)} (${high.value.toFixed(1)} vs ${low.value.toFixed(1)}).`),
     },
     {
       key: 'humidity',
-      label: 'Humidity',
+      label: 'Humidity', i18nKey: 'compareEngine.metricHumidity',
       icon: '💧',
       kind: 'number',
       unit: 'percent',
       read: (entry) => (entry.current ? entry.current.relative_humidity_2m : null),
       text: (entry, format) => format.percent(entry.current.relative_humidity_2m),
       insight: (high, low) =>
-        `Humidity is ${Math.round(Math.abs(high.value - low.value))} percentage points higher in ${cityLabel(high.city)} than in ${cityLabel(low.city)}.`,
+        translate(format, 'compareEngine.insightCloud', { gap: Math.round(Math.abs(high.value - low.value)), city: cityLabel(high.city), other: cityLabel(low.city) }, `Humidity is ${Math.round(Math.abs(high.value - low.value))} percentage points higher in ${cityLabel(high.city)} than in ${cityLabel(low.city)}.`),
     },
     {
       key: 'precipitation',
-      label: 'Precipitation',
+      label: 'Precipitation', i18nKey: 'compareEngine.metricPrecipitation',
       icon: '🌧️',
       kind: 'number',
       unit: 'precip',
       read: (entry) => (entry.current ? entry.current.precipitation : null),
       text: (entry, format) => format.precip(entry.current.precipitation),
       insight: (high, low, diff, format) =>
-        `More precipitation is falling in ${cityLabel(high.city)} right now (${format.precip(high.value)} vs ${format.precip(low.value)}).`,
+        translate(format, 'compareEngine.insightPrecip', { gap: format.precip(high.value - low.value), city: cityLabel(high.city), other: cityLabel(low.city) }, `More precipitation is falling in ${cityLabel(high.city)} right now (${format.precip(high.value)} vs ${format.precip(low.value)}).`),
     },
     {
       key: 'cloudCover',
-      label: 'Cloud cover',
+      label: 'Cloud cover', i18nKey: 'compareEngine.metricCloudCover',
       icon: '☁️',
       kind: 'number',
       unit: 'percent',
       read: (entry) => (entry.current ? entry.current.cloud_cover : null),
       text: (entry, format) => format.percent(entry.current.cloud_cover),
       insight: (high, low) =>
-        `${cityLabel(high.city)} is cloudier than ${cityLabel(low.city)} right now (${Math.round(high.value)}% vs ${Math.round(low.value)}%).`,
+        translate(format, 'compareEngine.insightCloud', { gap: Math.round(high.value - low.value), city: cityLabel(high.city), other: cityLabel(low.city) }, `${cityLabel(high.city)} is cloudier than ${cityLabel(low.city)} right now (${Math.round(high.value)}% vs ${Math.round(low.value)}%).`),
     },
     {
       key: 'sun',
-      label: 'Sunrise / sunset',
+      label: 'Sunrise / sunset', i18nKey: 'compareEngine.metricSun',
       icon: '🌅',
       kind: 'text',
       read: (entry) => entry.sun,
@@ -378,7 +384,7 @@
   const DAILY_METRICS = [
     {
       key: 'high',
-      label: 'High',
+      label: 'High', i18nKey: 'share.high',
       icon: '🔺',
       kind: 'number',
       unit: 'temp',
@@ -389,7 +395,7 @@
     },
     {
       key: 'low',
-      label: 'Low',
+      label: 'Low', i18nKey: 'share.low',
       icon: '🔻',
       kind: 'number',
       unit: 'temp',
@@ -400,7 +406,7 @@
     },
     {
       key: 'rainChance',
-      label: 'Rain chance',
+      label: 'Rain chance', i18nKey: 'compareEngine.metricRainChance',
       icon: '☔',
       kind: 'number',
       unit: 'percent',
@@ -411,7 +417,7 @@
     },
     {
       key: 'uvMax',
-      label: 'Max UV',
+      label: 'Max UV', i18nKey: 'compareEngine.metricMaxUv',
       icon: '☀️',
       kind: 'number',
       unit: 'uv',
@@ -422,7 +428,7 @@
     },
     {
       key: 'windMax',
-      label: 'Max wind',
+      label: 'Max wind', i18nKey: 'compareEngine.metricMaxWind',
       icon: '💨',
       kind: 'number',
       unit: 'wind',
@@ -569,7 +575,7 @@
 
       return {
         key: metric.key,
-        label: metric.label,
+        label: translate(fmt, metric.i18nKey, null, metric.label),
         icon: metric.icon,
         kind: metric.kind,
         unit: metric.unit || null,

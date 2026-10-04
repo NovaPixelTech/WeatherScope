@@ -170,12 +170,12 @@
 
   /** Static presentation metadata: the six "everyday decisions" tiles. */
   const ADVICE_META = {
-    umbrella: { id: 'umbrella', icon: '☔', label: 'Umbrella' },
-    walk: { id: 'walk', icon: '🚶', label: 'Walk' },
-    carWash: { id: 'carWash', icon: '🚗', label: 'Wash car' },
-    cycling: { id: 'cycling', icon: '🚴', label: 'Cycling' },
-    swimming: { id: 'swimming', icon: '🏊', label: 'Swimming' },
-    clothing: { id: 'clothing', icon: '👕', label: 'What to wear' },
+    umbrella: { id: 'umbrella', icon: '☔', label: 'Umbrella', key: 'adviceEngine.tileUmbrella' },
+    walk: { id: 'walk', icon: '🚶', label: 'Walk', key: 'adviceEngine.tileWalk' },
+    carWash: { id: 'carWash', icon: '🚗', label: 'Wash car', key: 'adviceEngine.tileCarWash' },
+    cycling: { id: 'cycling', icon: '🚴', label: 'Cycling', key: 'adviceEngine.tileCycling' },
+    swimming: { id: 'swimming', icon: '🏊', label: 'Swimming', key: 'adviceEngine.tileSwimming' },
+    clothing: { id: 'clothing', icon: '👕', label: 'What to wear', key: 'adviceEngine.tileClothing' },
   };
 
   /** Render order of the decision tiles. */
@@ -208,6 +208,12 @@
 
   function capitalize(text) {
     return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+  }
+
+  function tr(profile, key, vars, fallback) {
+    return profile && typeof profile.t === 'function'
+      ? profile.t(key, vars, fallback)
+      : fallback;
   }
 
   /** Read a parallel array safely; Open-Meteo omits whole variables sometimes. */
@@ -506,7 +512,8 @@
       scope,
       list,
       dayCount: list.length,
-      scopePhrase: scope === 'today' ? 'the rest of today' : 'the next 24 hours',
+       scopePhrase: scope === 'today' ? tr(context, 'adviceEngine.scopeToday', null, 'the rest of today') : tr(context, 'adviceEngine.scopeNext24', null, 'the next 24 hours'),
+       t: typeof context.t === 'function' ? context.t : null,
 
       // Rain
       chanceAvailable: chances.length > 0,
@@ -552,7 +559,8 @@
   // ==========================================================================
 
   function result(meta, verdict, tone, headline, detail, extra) {
-    return Object.assign({ ok: true, id: meta.id, icon: meta.icon, label: meta.label, verdict, tone, headline, detail, window: null }, extra || {});
+     const translator = meta && meta.t;
+     return Object.assign({ ok: true, id: meta.id, icon: meta.icon, label: meta.key && translator ? translator(meta.key) : meta.label, verdict, tone, headline, detail, window: null }, extra || {});
   }
 
   /** The graceful state required when the readings a getter needs are absent. */
@@ -1286,6 +1294,9 @@
       const builder = BUILDERS[key];
       try {
         decisions[key] = builder ? builder(profile) : notEnoughData(ADVICE_META[key]);
+        if (decisions[key] && profile && typeof profile.t === 'function') {
+          decisions[key].label = profile.t(ADVICE_META[key].key, null);
+        }
       } catch (err) {
         // Never let one recommendation break the rest of the dashboard.
         if (typeof console !== 'undefined' && console.warn) {
@@ -1316,6 +1327,44 @@
         { id: 'summary', icon: '⛅', label: "Today's advice" },
         'This summary could not be calculated from the current forecast.'
       );
+    }
+
+    if (profile && typeof profile.t === 'function') {
+      const headlineKeys = {
+        'Definitely bring an umbrella': 'adviceEngine.umbrellaDefinitely',
+        'Bring an umbrella': 'adviceEngine.umbrellaLikely',
+        'Probably not': 'adviceEngine.umbrellaUnlikely',
+        'No ideal period today': 'adviceEngine.walkNone',
+        'Limited detail for this period': 'adviceEngine.walkLimited',
+        'Good day to wash the car': 'adviceEngine.carWashGood',
+        'Not ideal today': 'adviceEngine.carWashBad',
+        'Not ideal for cycling': 'adviceEngine.cyclingBad',
+        'Good for cycling': 'adviceEngine.cyclingGood',
+        'Good outdoor swimming weather': 'adviceEngine.swimGood',
+        'Light clothing': 'adviceEngine.clothingLight',
+        'Warm jacket + umbrella': 'adviceEngine.clothingJacketUmbrella',
+        'T-shirt weather + umbrella': 'adviceEngine.clothingTShirtUmbrella',
+        'T-shirt weather': 'adviceEngine.clothingTShirt',
+        'Light jacket recommended': 'adviceEngine.clothingLightJacket',
+        'Warm jacket recommended': 'adviceEngine.clothingWarmJacket',
+        'Winter coat recommended': 'adviceEngine.clothingCoat',
+        'Very warm layers needed': 'adviceEngine.clothingLayers',
+        'Snowy today': 'adviceEngine.summarySnow',
+        'Thunderstorms expected': 'adviceEngine.summaryStorm',
+        'Take an umbrella today': 'adviceEngine.summaryUmbrella',
+        'Cold today': 'adviceEngine.summaryCold',
+        'Hot today': 'adviceEngine.summaryHot',
+        'Great day to be outside': 'adviceEngine.summaryGreat',
+        'Mixed conditions today': 'adviceEngine.summaryMixed',
+        'Cloudy but dry today': 'adviceEngine.summaryCloudyDry',
+      };
+      Object.keys(decisions).forEach((key) => {
+        const item = decisions[key];
+        const i18nKey = headlineKeys[item && item.headline];
+        if (i18nKey) item.headline = profile.t(i18nKey, null);
+      });
+      const summaryKey = headlineKeys[summary && summary.headline];
+      if (summaryKey) summary.headline = profile.t(summaryKey, null);
     }
 
     return { decisions, summary, rainWindow, order };

@@ -1846,9 +1846,9 @@
     const maxTemp = daily && daily.temperature_2m_max && daily.temperature_2m_max.length > 0 ? formatTemp(daily.temperature_2m_max[0]) : temp;
     const minTemp = daily && daily.temperature_2m_min && daily.temperature_2m_min.length > 0 ? formatTemp(daily.temperature_2m_min[0]) : temp;
     const rainChance = Math.round(rain);
-    const condition = WMO_MAP[current.weather_code] || { label: 'Clear' };
-    const place = shareEngine() ? shareEngine().describePlace({ city: city.name, admin1: city.admin1, country: city.country }) : city.name;
-    return "Weather in " + place + "\n" + temp + unit + " · " + condition.label + "\n" + rainChance + "% rain\nHigh " + maxTemp + unit + "\nLow " + minTemp + unit;
+     const condition = WMO_MAP[current.weather_code] || { label: 'Clear' };
+     const place = shareEngine() ? shareEngine().describePlace({ city: city.name, admin1: city.admin1, country: city.country }) : city.name;
+     return t('share.weatherIn', { place }, `Weather in ${place}`) + "\n" + temp + unit + " · " + conditionText(current.weather_code) + "\n" + t('share.rain', { value: rainChance }, `${rainChance}% rain`) + "\n" + t('share.high', { value: maxTemp + unit }, `High ${maxTemp}${unit}`) + "\n" + t('share.low', { value: minTemp + unit }, `Low ${minTemp}${unit}`);
   }
 
   /**
@@ -1880,15 +1880,15 @@
 
     copyShareText(text + '\n' + url).then(function (copied) {
       if (copied) {
-        announceShare('Link copied. Opening it shows ' + place + ' with the shared cards.');
+         announceShare(t('share.copied', { place }, 'Link copied. Opening it shows ' + place + ' with the shared cards.'));
         return;
       }
       // Nothing was copied, so the link is put where the visitor can still
       // reach it by hand - and they are told, rather than left guessing.
       const shown = showShareUrlInAddressBar(url);
-      announceShare(shown
-        ? 'Could not copy automatically. The link for ' + place + ' is now in the address bar.'
-        : 'Could not copy automatically. Copy the link from the address bar to share this forecast.');
+       announceShare(shown
+         ? t('share.copyFailedInBar', { place }, 'Could not copy automatically. The link for ' + place + ' is now in the address bar.')
+         : t('share.copyFailed', null, 'Could not copy automatically. Copy the link from the address bar to share this forecast.'));
     });
   }
 
@@ -2095,10 +2095,10 @@
       const precipProb = hourly.precipitation_probability ? hourly.precipitation_probability[actualIdx] : 0;
       const condition = WMO_MAP[wmoCode] || { icon: 'clear' };
 
-      const card = document.createElement('div');
+       const card = document.createElement('div');
       card.className = `hourly-item ${isNow ? 'now' : ''}`;
       card.innerHTML = `
-        <span class="hourly-time">${isNow ? 'Now' : hourPart}</span>
+         <span class="hourly-time">${isNow ? t('forecast.now', null, 'Now') : hourPart}</span>
         <div class="hourly-icon">${getWeatherSvg(condition.icon, isDayHour)}</div>
         <span class="hourly-temp">${tempVal}°</span>
         <div class="hourly-rain">
@@ -2161,6 +2161,7 @@
         hourly,
         currentTime: current ? current.time : null,
         format: adviceFormat(),
+        t: window.I18n && typeof window.I18n.t === 'function' ? window.I18n.t : null,
       });
     } catch (err) {
       // The engine is defensive by design, but a bug here must never take the
@@ -2183,7 +2184,7 @@
     if (!window.WeatherScopeAdvice || !profile) return null;
 
     const cache = state.adviceCache;
-    if (cache && cache.windowKey === windowKey && cache.recommendations) {
+     if (cache && cache.windowKey === windowKey && cache.recommendations && cache.lang === (window.I18n ? window.I18n.getLanguage() : 'en')) {
       return cache.recommendations;
     }
 
@@ -2198,6 +2199,7 @@
     if (cache) {
       cache.windowKey = windowKey;
       cache.recommendations = built;
+      cache.lang = window.I18n ? window.I18n.getLanguage() : 'en';
     }
     return built;
   }
@@ -2284,7 +2286,8 @@
       tab.className = 'assistant-window-tab';
       tab.setAttribute('role', 'radio');
       tab.dataset.windowKey = w.key;
-      tab.textContent = w.label;
+       const labelKey = `adviceEngine.window${w.key.charAt(0).toUpperCase()}${w.key.slice(1)}`;
+       tab.textContent = t(labelKey, null, w.label);
       tab.setAttribute('aria-checked', w.key === state.adviceWindowKey ? 'true' : 'false');
       tab.tabIndex = w.key === state.adviceWindowKey ? 0 : -1;
       container.appendChild(tab);
@@ -2337,8 +2340,9 @@
     daily.time.forEach((dayStr, idx) => {
       const dateObj = new Date(dayStr + 'T12:00:00');
       const isToday = idx === 0;
-      const dayName = isToday ? 'Today' : dateObj.toLocaleDateString('en-US', { weekday: 'short' });
-      const monthDay = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+       const activeLocale = window.I18n && typeof window.I18n.locale === 'function' ? window.I18n.locale() : 'en-GB';
+       const dayName = isToday ? t('forecast.today', null, 'Today') : dateObj.toLocaleDateString(activeLocale, { weekday: 'short' });
+       const monthDay = dateObj.toLocaleDateString(activeLocale, { month: 'short', day: 'numeric' });
       const wmoCode = daily.weather_code[idx];
       const condition = WMO_MAP[wmoCode] || { label: 'Clear', icon: 'clear' };
 
@@ -2366,11 +2370,11 @@
         <div class="daily-icon-col">
           ${getWeatherSvg(condition.icon, 1)}
         </div>
-        <div class="daily-condition-label">${condition.label}</div>
+         <div class="daily-condition-label">${conditionText(wmoCode)}</div>
         <div class="daily-extra-col">
           ${
             uvInfo
-              ? `<span class="daily-extra-item daily-uv-item" data-uv-level="${uvInfo.badgeClass}" title="Max UV index">
+               ? `<span class="daily-extra-item daily-uv-item" data-uv-level="${uvInfo.badgeClass}" title="${t('forecast.maxUvTitle', null, 'Max UV index')}">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="4"/>
                     <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
@@ -2381,7 +2385,7 @@
           }
           ${
             rainProb !== null && rainProb !== undefined
-              ? `<span class="daily-extra-item" title="Chance of precipitation">
+               ? `<span class="daily-extra-item" title="${t('forecast.precipChanceTitle', null, 'Chance of precipitation')}">
                   <svg viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
                   </svg>
@@ -2598,7 +2602,7 @@
     }
     if (elements.sharedBannerCards) {
       elements.sharedBannerCards.textContent = share
-        ? share.describeCards(cards)
+         ? share.describeCards(cards, t)
         : '';
     }
     if (elements.sharedBanner) elements.sharedBanner.hidden = false;
@@ -2612,8 +2616,8 @@
       first.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
     }
 
-    announceShare('Shared forecast for ' + (share ? share.describePlace(payload) : payload.city) +
-      '. Showing ' + (share ? share.describeCards(cards) : '') + '.');
+     announceShare('Shared forecast for ' + (share ? share.describePlace(payload) : payload.city) +
+       '. Showing ' + (share ? share.describeCards(cards, t) : '') + '.');
   }
 
   /**
@@ -3028,12 +3032,12 @@
         </svg>
       `;
       const msg1 = document.createElement('p');
-      msg1.textContent = `No cities in the ${WORLD_CITIES.length}-city benchmark dataset currently match this exact climate criteria.`;
+       msg1.textContent = t('climate.emptyTitle', { count: WORLD_CITIES.length }, `No cities in the ${WORLD_CITIES.length}-city benchmark dataset currently match this exact climate criteria.`);
       const msg2 = document.createElement('p');
       msg2.style.fontSize = '0.85rem';
       msg2.style.color = 'var(--text-muted)';
       msg2.style.marginTop = '4px';
-      msg2.textContent = 'Try a broader condition like "Sunny", "Warm", or "Cloudy".';
+       msg2.textContent = t('climate.emptyHint', null, 'Try a broader condition like "Sunny", "Warm", or "Cloudy".');
       empty.appendChild(msg1);
       empty.appendChild(msg2);
       elements.climateResultsGrid.appendChild(empty);
@@ -3138,6 +3142,7 @@
         if (code === null || code === undefined) return '--';
         return conditionText(code);
       },
+      t,
     };
   }
 
@@ -3279,7 +3284,7 @@
     try {
       const cities = await searchCities(query);
       if (!cities || cities.length === 0) {
-        setCompareNotice(`No results found for "${query}". Try a different spelling or add a country.`);
+       setCompareNotice(t('compare.noResults', { query }, `No results found for "${query}". Try a different spelling or add a country.`));
         return;
       }
 
@@ -3297,8 +3302,8 @@
       console.error('Comparison search error:', err);
       setCompareNotice(
         /timed out/i.test(err.message || '')
-          ? 'The location search timed out. Check your connection and try again.'
-          : 'The location search failed. Please try again.'
+           ? t('compare.searchTimedOut', null, 'The location search timed out. Check your connection and try again.')
+           : t('compare.searchFailed', null, 'The location search failed. Please try again.')
       );
     }
   }
@@ -3426,7 +3431,7 @@
     elements.compareRunBtn.disabled = !comparable;
     elements.compareAddBtn.disabled = !engine.canAddMore(state.compareLocations);
     elements.compareClearBtn.disabled = state.compareLocations.length === 0;
-    elements.compareCount.textContent = `${state.compareLocations.length} of ${engine.THRESHOLDS.maxLocations} selected`;
+    elements.compareCount.textContent = t('compare.count', { selected: state.compareLocations.length, max: engine.THRESHOLDS.maxLocations }, `${state.compareLocations.length} of ${engine.THRESHOLDS.maxLocations} selected`);
 
     const hasData = state.compareLocations.some((slot) => slot && slot.weather);
     const hasError = state.compareLocations.some((slot) => slot && slot.error);
@@ -3477,7 +3482,7 @@
       const label = document.createElement('span');
       label.className = 'compare-slot-label';
       label.id = `compare-slot-${index}`;
-      label.textContent = `Location ${COMPARE_SLOT_LABELS[index] || index + 1}`;
+       label.textContent = t('compare.locationSlot', { slot: COMPARE_SLOT_LABELS[index] || index + 1 }, `Location ${COMPARE_SLOT_LABELS[index] || index + 1}`);
       row.appendChild(label);
 
       if (slot && slot.city) {
@@ -3490,8 +3495,8 @@
         compareIconButton('Move earlier', ICON_ARROW_UP, () => moveCompareLocation(index, -1), index === 0),
         compareIconButton('Move later', ICON_ARROW_DOWN, () => moveCompareLocation(index, 1), index === locations.length - 1),
         slot && slot.city
-          ? compareIconButton(`Remove ${slot.city.name} from the comparison`, ICON_TRASH, () => removeCompareLocation(index), false)
-          : compareIconButton('Clear this location', ICON_CLOSE, () => removeCompareLocation(index), false)
+           ? compareIconButton(`Remove ${slot.city.name} from the comparison`, ICON_TRASH, () => removeCompareLocation(index), false)
+           : compareIconButton('Clear this location', ICON_CLOSE, () => removeCompareLocation(index), false)
       );
       row.appendChild(actions);
 
@@ -3505,12 +3510,12 @@
       empty.className = 'compare-slot-empty';
 
       const text = document.createElement('span');
-      text.textContent = `Location ${COMPARE_SLOT_LABELS[index] || index + 1} — use the search above or a popular city`;
+       text.textContent = t('compare.locationSlotEmpty', { slot: COMPARE_SLOT_LABELS[index] || index + 1 }, `Location ${COMPARE_SLOT_LABELS[index] || index + 1} — use the search above or a popular city`);
 
       const add = document.createElement('button');
       add.type = 'button';
       add.className = 'compare-retry-btn';
-      add.textContent = 'Add';
+       add.textContent = t('compare.add', null, 'Add');
       add.addEventListener('click', focusCompareSearch);
 
       empty.append(text, add);
@@ -3546,15 +3551,15 @@
 
     const name = document.createElement('span');
     name.className = 'compare-slot-place-name';
-    name.textContent = city.name || 'Unknown location';
+     name.textContent = city.name || t('compare.unknownLocation', null, 'Unknown location');
 
     const meta = document.createElement('span');
     meta.className = 'compare-slot-place-meta';
-    meta.textContent = [city.admin1, city.country].filter(Boolean).join(', ') || 'Selected location';
+     meta.textContent = [city.admin1, city.country].filter(Boolean).join(', ') || t('compare.selectedLocation', null, 'Selected location');
 
     text.append(name, meta);
     button.append(badge, text);
-    button.setAttribute('aria-label', `${city.name}, ${meta.textContent}. Change this location.`);
+     button.setAttribute('aria-label', t('compare.changeLocation', { city: city.name, meta: meta.textContent }, `${city.name}, ${meta.textContent}. Change this location.`));
     button.addEventListener('click', () => beginCompareReplace(index));
 
     return button;
@@ -3565,8 +3570,18 @@
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'compare-slot-btn';
+    const localized = label === 'Move earlier'
+      ? t('compare.moveEarlier', null, label)
+      : label === 'Move later'
+        ? t('compare.moveLater', null, label)
+        : label === 'Clear this location'
+          ? t('compare.clearSlot', null, label)
+          : label.indexOf('Remove ') === 0
+            ? t('compare.removeCity', { city: label.slice(7, -25) }, label)
+        : label;
     button.setAttribute('aria-label', label);
-    button.title = label;
+    if (localized !== label) button.setAttribute('aria-label', localized);
+    button.title = localized;
     button.disabled = !!disabled;
     button.innerHTML = iconPath;
     button.addEventListener('click', onClick);
@@ -3605,7 +3620,7 @@
     const corner = document.createElement('th');
     corner.className = 'compare-metric-head';
     corner.scope = 'col';
-    corner.textContent = 'Metric';
+     corner.textContent = t('compare.metricHead', null, 'Metric');
     headRow.appendChild(corner);
 
     const columnRefs = table.columns.map((column) => {
@@ -3704,7 +3719,7 @@ const icon = document.createElement('span');
       const zone = (column.city && column.city.timezone) || 'UTC';
       const now = new Date();
 
-      columnRef.name.textContent = column.city ? column.city.name : 'Location';
+       columnRef.name.textContent = column.city ? column.city.name : t('compare.locationFallback', null, 'Location');
       columnRef.meta.textContent = [column.city && column.city.admin1, column.city && column.city.country]
         .filter(Boolean)
         .join(', ') || '—';
@@ -3760,8 +3775,8 @@ const icon = document.createElement('span');
         const retry = document.createElement('button');
         retry.type = 'button';
         retry.className = 'compare-retry-btn';
-        retry.textContent = 'Try again';
-        retry.setAttribute('aria-label', `Retry loading the weather for ${column.city ? column.city.name : 'this location'}`);
+         retry.textContent = t('compare.tryAgain', null, 'Try again');
+         retry.setAttribute('aria-label', t('compare.retryAria', { city: column.city ? column.city.name : t('compare.thisLocation', null, 'this location') }, `Retry loading the weather for ${column.city ? column.city.name : 'this location'}`));
         retry.addEventListener('click', () => loadComparisonWeather({ retryIndex: column.index }));
 
         wrap.append(text, retry);
@@ -3769,7 +3784,7 @@ const icon = document.createElement('span');
         ref.errorText = text;
         ref.mode = 'error';
       }
-      const reason = (column.error && column.error.message) || 'Weather unavailable';
+       const reason = (column.error && column.error.message) || t('compare.weatherUnavailable', null, 'Weather unavailable');
       if (ref.errorText.textContent !== reason) ref.errorText.textContent = reason;
       return;
     }
@@ -3859,8 +3874,8 @@ const icon = document.createElement('span');
       empty.setAttribute('role', 'listitem');
       empty.textContent =
         table.okCount < 2
-          ? 'At least two locations with live data are needed for a comparison.'
-          : 'These locations are currently very similar - no difference stands out.';
+           ? t('compare.needTwoLocations', null, 'At least two locations with live data are needed for a comparison.')
+           : t('compare.verySimilar', null, 'These locations are currently very similar - no difference stands out.');
       list.appendChild(empty);
       return;
     }
@@ -3887,7 +3902,7 @@ const icon = document.createElement('span');
       if (oldest === null || minutes > oldest.minutes) oldest = { label, minutes };
     });
 
-    elements.compareFreshness.textContent = oldest ? `Latest reading: ${oldest.label.toLowerCase()}` : '';
+     elements.compareFreshness.textContent = oldest ? t('compare.freshness', { label: oldest.label.toLowerCase() }, `Latest reading: ${oldest.label.toLowerCase()}`) : '';
   }
 
   /**
@@ -4169,7 +4184,7 @@ const icon = document.createElement('span');
     if (options.disambiguate) {
       const hint = document.createElement('div');
       hint.className = 'autocomplete-hint';
-      hint.textContent = `${results.length} matching locations - select one`;
+       hint.textContent = t('search.matchingLocations', { count: results.length }, `${results.length} matching locations - select one`);
       elements.autocompleteList.insertBefore(hint, elements.autocompleteList.firstChild);
     }
 
@@ -4508,11 +4523,11 @@ const icon = document.createElement('span');
 
           const name = document.createElement('span');
           name.className = 'autocomplete-item-name';
-          name.textContent = `Search worldwide cities matching "${val}" →`;
+           name.textContent = t('climate.searchWorldwide', { query: val }, `Search worldwide cities matching "${val}" →`);
 
           const meta = document.createElement('span');
           meta.className = 'autocomplete-item-meta';
-          meta.textContent = 'Climate Discovery';
+           meta.textContent = t('climate.discovery', null, 'Climate Discovery');
 
           item.appendChild(name);
           item.appendChild(meta);

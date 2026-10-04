@@ -151,7 +151,7 @@
             <!-- The digits are per-second volatile, so they are hidden from AT;
                  the non-volatile zone name below carries the accessible meaning. -->
             <span class="user-clock-time" id="user-clock-time" aria-hidden="true">--:--:--</span>
-            <span class="user-clock-zone" id="user-clock-zone">Your time</span>
+            <span class="user-clock-zone" id="user-clock-zone" data-i18n="nav.yourTime">Your time</span>
           </span>
         </div>
 
@@ -270,9 +270,9 @@
           <div>
             <div class="climate-title-row">
               <h2 class="card-section-title" id="climate-results-title" data-i18n="climate.resultsTitle">Cities matching climate conditions</h2>
-              <span class="count-badge" id="climate-results-count">0 found</span>
+               <span class="count-badge" id="climate-results-count" data-i18n="climate.foundMany" data-i18n-vars='{"count":0}'>0 found</span>
             </div>
-            <p class="card-subtitle" id="climate-results-subtitle">Click on any city card to explore its detailed real-time weather and 7-day outlook.</p>
+             <p class="card-subtitle" id="climate-results-subtitle" data-i18n="climate.clickToExplore">Click on any city card to explore its detailed real-time weather and 7-day outlook.</p>
           </div>
 
           <div class="climate-results-controls">
@@ -306,7 +306,7 @@
         <div class="card compare-locations-card">
           <div class="compare-title-row">
             <h2 class="card-section-title" id="compare-heading" data-i18n="compare.heading">Compare Locations</h2>
-            <span class="count-badge" id="compare-count">0 of 4 selected</span>
+             <span class="count-badge" id="compare-count" data-i18n="compare.count" data-i18n-vars='{"selected":0,"max":4}'>0 of 4 selected</span>
           </div>
           <p class="card-subtitle" id="compare-subtitle" data-i18n="compare.subtitle">
             Search above or tap a popular city to build a list, then compare 2 to 4 places.
@@ -527,7 +527,7 @@
         <section class="card assistant-card" id="assistant-card" aria-labelledby="assistant-heading" hidden>
           <div class="assistant-header">
             <h2 class="card-section-title" id="assistant-heading" data-i18n="assistant.heading">Today's advice</h2>
-            <p class="card-subtitle assistant-scope" id="assistant-scope">Based on the hourly forecast</p>
+           <p class="card-subtitle assistant-scope" id="assistant-scope" data-i18n="assistant.scopeToday">Based on the rest of today</p>
           </div>
 
           <!-- Headline recommendation (the single most useful sentence) -->
@@ -571,7 +571,7 @@
                 <span class="metric-value" id="humidity-val">57</span>
                 <span class="metric-unit">%</span>
               </div>
-              <p class="metric-status" id="humidity-status">Comfortable</p>
+             <p class="metric-status" id="humidity-status" data-i18n="metrics.humidityComfortable">Comfortable humidity</p>
             </div>
 
             <!-- Wind -->
@@ -656,7 +656,7 @@
                 <span class="metric-value" id="precip-val">0.0</span>
                 <span class="metric-unit" id="precip-unit-display">mm</span>
               </div>
-              <p class="metric-status" id="cloud-cover-status">Cloud cover: 18%</p>
+             <p class="metric-status" id="cloud-cover-status" data-i18n="metrics.cloudCover" data-i18n-vars='{"value":18}'>Cloud cover: 18%</p>
             </div>
 
             <!-- Local Time & Offset From You -->
@@ -766,8 +766,8 @@
 
     <!-- Footer -->
     <footer class="app-footer">
-      <p>Data provided by <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo API</a> &bull; <span id="footer-tagline" data-i18n="footer.tagline">Real-time global meteorological intelligence</span></p>
-      <p class="footer-timezone-note" id="footer-timezone-note">Local times use each city's IANA timezone and tick in real time &middot; Your reference time is detected from your device timezone (<span id="footer-user-zone">--</span>)</p>
+       <p data-i18n-html="footer.providedBy" data-i18n-vars='{"link":"<a href=\"https://open-meteo.com/\" target=\"_blank\" rel=\"noopener noreferrer\">Open-Meteo API</a>"}'>Data provided by <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo API</a></p>
+       <p class="footer-timezone-note" id="footer-timezone-note">Local times use each city's IANA timezone and tick in real time &middot; Your reference time is detected from your device timezone (<span id="footer-user-zone">--</span>)</p>
     </footer>
   </div>
 

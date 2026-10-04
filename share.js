@@ -168,9 +168,15 @@
   }
 
   /** "Today at a glance, 24-hour forecast" - what the banner reads out. */
-  function describeCards(cards) {
+  function describeCards(cards, translate) {
     const keys = sanitizeCards(cards);
-    return keys.map((key) => CARD_LABELS[key]).join(', ');
+    return keys.map((key) => {
+      const i18nKey = {
+        glance: 'glance.heading', hero: 'metrics.heading', assistant: 'assistant.heading',
+        metrics: 'metrics.aria', hourly: 'forecast.hourlyHeading', daily: 'forecast.dailyHeading',
+      }[key];
+      return typeof translate === 'function' ? translate(i18nKey, null, CARD_LABELS[key]) : CARD_LABELS[key];
+    }).join(', ');
   }
 
   /**
