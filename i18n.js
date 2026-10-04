@@ -1720,16 +1720,6 @@
 
   const GEO_ENDPOINTS = [
     {
-      url: 'https://www.cloudflare.com/cdn-cgi/trace',
-      parse: (body) => {
-        const locMatch = /(?:^|\r?\n)loc\s*=\s*([A-Za-z]{2})(?:\r?\n|$)/i.exec(body);
-        const ipMatch = /(?:^|\r?\n)ip\s*=\s*([0-9a-fA-F:.]+)(?:\r?\n|$)/i.exec(body);
-        const country = locMatch ? locMatch[1].toUpperCase() : null;
-        const ip = ipMatch ? ipMatch[1] : null;
-        return { country, ip, city: null };
-      },
-    },
-    {
       url: 'https://ipwho.is/',
       parse: (body) => {
         const data = JSON.parse(body);
@@ -1762,6 +1752,20 @@
     },
   ];
 
+  function validIp(value) {
+    if (typeof value !== 'string' || !value.trim()) return null;
+    const ip = value.trim();
+    // Validate with the platform URL parser, which accepts both IPv4 and IPv6.
+    try {
+      const hostname = new URL(`http://${ip}/`).hostname;
+      const normalizedHost = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+      if (!normalizedHost || normalizedHost !== ip.toLowerCase()) return null;
+      return ip;
+    } catch (err) {
+      return null;
+    }
+  }
+
   function fetchGeoInfo(endpoint) {
     const fetchImpl = win && typeof win.fetch === 'function'
       ? win.fetch.bind(win)
@@ -1788,7 +1792,9 @@
       .then((body) => {
         const result = endpoint.parse(body);
         if (!result || !result.country) throw new Error('geo response unparseable');
-        return result;
+        const country = String(result.country).trim().toUpperCase();
+        if (!/^[A-Z]{2}$/.test(country)) throw new Error('invalid country code');
+        return { ...result, country, ip: validIp(result.ip), city: typeof result.city === 'string' ? result.city.trim() || null : null };
       });
 
     if (!hasAbortController) {
@@ -1825,14 +1831,14 @@
     return raceIpLanguage()
       .then((info) => preferred
         ? { ...info, lang: preferred, source: preferredSource }
-        : { ...info, source: 'ip' })
+        : { ...info, lang: info.lang || detectBrowserLang() || detectTimeZoneLang() || DEFAULT_LANG, source: info.lang ? 'ip' : 'browser' })
       .catch(() => preferred
         ? { lang: preferred, source: preferredSource, ip: null, city: null, country: null }
         : fallbackLang());
   }
 
   /**
-   * The first endpoint to answer with a usable language wins.
+   * Prefer a complete IP/city response, then fall back to the best country/IP response.
    *
    * Every attempt is consumed by exactly one branch, so a slow or blocked
    * endpoint can never leave an unhandled rejection behind - which would have
@@ -1843,20 +1849,31 @@
   function raceIpLanguage() {
     const attempts = GEO_ENDPOINTS.map((endpoint) => fetchGeoInfo(endpoint).then((info) => {
       const lang = langForCountry(info.country);
-      if (!lang) throw new Error('geo language unavailable');
       return { lang, ip: info.ip, city: info.city, country: info.country };
     }));
 
-    if (typeof Promise.any === 'function') return Promise.any(attempts);
+    // Prefer a complete location (IP + city) when available; otherwise retain
+    // the best country/IP result rather than returning an empty location.
+    const complete = attempts.map((attempt) => attempt.then((info) => {
+      if (!info.ip || !info.city) throw new Error('incomplete geo result');
+      return info;
+    }));
+    if (typeof Promise.any === 'function') {
+      return Promise.any(complete).catch(() => Promise.any(attempts));
+    }
 
     // Promise.any is missing on older Safari / Firefox / Edge: emulate it, but
     // hand the caller the winning *value*, never the settled result object.
     if (typeof Promise.allSettled === 'function') {
-      return Promise.allSettled(attempts).then((results) => {
+      return Promise.allSettled(complete).then((results) => {
         const hit = results.find((result) => result.status === 'fulfilled');
         if (!hit) throw new Error('geo unavailable');
         return hit.value;
-      });
+      }).catch(() => Promise.allSettled(attempts).then((results) => {
+        const hit = results.find((result) => result.status === 'fulfilled');
+        if (!hit) throw new Error('geo unavailable');
+        return hit.value;
+      }));
     }
     return Promise.reject(new Error('geo unavailable'));
   }

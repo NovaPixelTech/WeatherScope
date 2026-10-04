@@ -4857,13 +4857,19 @@ const icon = document.createElement('span');
   function updateUserLocationDisplay(geoInfo) {
     if (!geoInfo || !elements.userLocation || !elements.userLocationIp || !elements.userLocationPlace) return;
     const { ip, city, country } = geoInfo;
-    if (ip) {
-      elements.userLocationIp.textContent = ip;
+    if (ip || city || country) {
+      elements.userLocationIp.textContent = ip || '—';
+      let countryName = country;
+      if (country && /^[A-Z]{2}$/i.test(country) && typeof Intl !== 'undefined' && Intl.DisplayNames) {
+        try {
+          countryName = new Intl.DisplayNames([window.I18n ? window.I18n.locale() : 'en'], { type: 'region' }).of(country.toUpperCase()) || country;
+        } catch (err) { /* retain provider's country value */ }
+      }
       let placeText = '';
-      if (country && city) {
-        placeText = t('nav.countryCity', { country, city }, `${country}, ${city}`);
-      } else if (country) {
-        placeText = country;
+      if (countryName && city) {
+        placeText = t('nav.countryCity', { country: countryName, city }, `${countryName}, ${city}`);
+      } else if (countryName) {
+        placeText = countryName;
       } else if (city) {
         placeText = city;
       } else {
