@@ -80,6 +80,69 @@
     CF: 'fr',
   };
 
+  // Map full country names to language codes (case-insensitive)
+  const COUNTRY_NAME_LANGS = {
+    // German
+    'GERMANY': 'de', 'DEUTSCHLAND': 'de',
+    'AUSTRIA': 'de', 'ÖSTERREICH': 'de', 'OESTERREICH': 'de',
+    'SWITZERLAND': 'de', 'SCHWEIZ': 'de',
+    'LIECHTENSTEIN': 'de',
+    'LUXEMBOURG': 'de',
+    // Greek
+    'GREECE': 'el', 'ΕΛΛΑΔΑ': 'el', 'ELLADA': 'el',
+    'CYPRUS': 'el', 'ΚΥΠΡΟΣ': 'el', 'KYPROS': 'el',
+    // Italian
+    'ITALY': 'it', 'ITALIA': 'it',
+    'SAN MARINO': 'it',
+    'VATICAN CITY': 'it', 'VATICAN': 'it', 'HOLY SEE': 'it',
+    // Spanish
+    'SPAIN': 'es', 'ESPAÑA': 'es', 'ESPANA': 'es',
+    'MEXICO': 'es', 'MÉXICO': 'es', 'MEXICO': 'es',
+    'ARGENTINA': 'es',
+    'BOLIVIA': 'es',
+    'CHILE': 'es',
+    'COLOMBIA': 'es',
+    'COSTA RICA': 'es',
+    'CUBA': 'es',
+    'DOMINICAN REPUBLIC': 'es',
+    'ECUADOR': 'es',
+    'EL SALVADOR': 'es',
+    'EQUATORIAL GUINEA': 'es',
+    'GUATEMALA': 'es',
+    'HONDURAS': 'es',
+    'NICARAGUA': 'es',
+    'PANAMA': 'es',
+    'PARAGUAY': 'es',
+    'PERU': 'es', 'PERÚ': 'es',
+    'PUERTO RICO': 'es',
+    'URUGUAY': 'es',
+    'VENEZUELA': 'es',
+    // French
+    'FRANCE': 'fr',
+    'MONACO': 'fr',
+    'BELGIUM': 'fr', 'BELGIQUE': 'fr',
+    'CÔTE D\'IVOIRE': 'fr', 'COTE D\'IVOIRE': 'fr', 'IVORY COAST': 'fr',
+    'SENEGAL': 'fr',
+    'DR CONGO': 'fr', 'DEMOCRATIC REPUBLIC OF THE CONGO': 'fr', 'CONGO DR': 'fr',
+    'CONGO': 'fr', 'REPUBLIC OF THE CONGO': 'fr',
+    'CAMEROON': 'fr', 'CAMEROUN': 'fr',
+    'MADAGASCAR': 'fr',
+    'HAITI': 'fr', 'HAÏTI': 'fr',
+    'BENIN': 'fr', 'BÉNIN': 'fr',
+    'BURKINA FASO': 'fr',
+    'BURUNDI': 'fr',
+    'DJIBOUTI': 'fr',
+    'GABON': 'fr',
+    'GUINEA': 'fr', 'GUINÉE': 'fr',
+    'MALI': 'fr',
+    'NIGER': 'fr',
+    'RWANDA': 'fr',
+    'TOGO': 'fr',
+    'CHAD': 'fr', 'TCHAD': 'fr',
+    'CENTRAL AFRICAN REPUBLIC': 'fr', 'CAR': 'fr',
+    'CENTRAL AFRICAN REP': 'fr',
+  };
+
   /** Retained timezone hints for consumers; IP-based startup does not use them. */
   const ZONE_LANGS = [
     { match: /^(Europe|Athens|_)/, test: /Athens/i, lang: 'el' },
@@ -2020,8 +2083,20 @@
   function langForCountry(countryCode) {
     if (typeof countryCode !== 'string') return null;
     const code = countryCode.trim().toUpperCase();
-    if (!/^[A-Z]{2}$/.test(code)) return null;
-    return COUNTRY_LANGS[code] || null;
+    // Try as ISO 2-letter code
+    if (/^[A-Z]{2}$/.test(code)) {
+      return COUNTRY_LANGS[code] || null;
+    }
+    // Try as full country name
+    if (COUNTRY_NAME_LANGS[code]) {
+      return COUNTRY_NAME_LANGS[code];
+    }
+    // Also try to match by removing common suffixes/prefixes variations
+    const normalized = code.replace(/\s*\(.*\)$/, '').trim();
+    if (COUNTRY_NAME_LANGS[normalized]) {
+      return COUNTRY_NAME_LANGS[normalized];
+    }
+    return null;
   }
 
   /** The supported language an IANA timezone suggests, or null. */
@@ -2364,9 +2439,13 @@
       .then((body) => {
         const result = endpoint.parse(body);
         if (!result || !result.country) throw new Error('geo response unparseable');
-        const country = String(result.country).trim().toUpperCase();
-        if (!/^[A-Z]{2}$/.test(country)) throw new Error('invalid country code');
-        return { ...result, country, ip: validIp(result.ip), city: typeof result.city === 'string' ? result.city.trim() || null : null };
+        const country = String(result.country).trim();
+        const countryUpper = country.toUpperCase();
+        // Accept either 2-letter code or full country name
+        const isValidCode = /^[A-Z]{2}$/i.test(country);
+        const isValidName = country.length > 2; // Heuristic for full names
+        if (!isValidCode && !isValidName) throw new Error('invalid country code');
+        return { ...result, country: countryUpper, ip: validIp(result.ip), city: typeof result.city === 'string' ? result.city.trim() || null : null };
       });
 
     if (!hasAbortController) {
