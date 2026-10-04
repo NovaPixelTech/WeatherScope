@@ -54,18 +54,39 @@ test('the card panel ships every part the renderer fills in', () => {
   const refs = [
     'camera',
     'cameraImage',
+    'cameraVideo',
     'cameraBadge',
     'cameraToggle',
     'cameraToggleLabel',
+    'cameraNext',
+    'cameraNextLabel',
     'cameraName',
     'cameraDistance',
     'cameraCredit',
     'cameraNote',
   ];
+  // One binding function serves every view, so the assertion is that each ref is
+  // listed for binding and present in the shared markup - not that each of the
+  // three views repeats its own copy of the query.
+  assert.match(appSource, /const CAMERA_REF_NAMES = \[/);
+  assert.match(appSource, /root\.querySelector\(`\[data-ref="\$\{name\}"\]`\)/,
+    'nothing binds the panel by data-ref any more');
   refs.forEach((ref) => {
-    assert.match(appSource, new RegExp(`${ref}: card\\.querySelector\\('\\[data-ref="${ref}"\\]'\\)`),
-      `the card never binds [data-ref="${ref}"]`);
-    assert.match(appSource, new RegExp(`data-ref="${ref}"`), `CARD_TEMPLATE has no [data-ref="${ref}"]`);
+    assert.match(appSource, new RegExp(`'${ref}'`), `${ref} is not in CAMERA_REF_NAMES`);
+    assert.match(appSource, new RegExp(`data-ref="${ref}"`), `the panel has no [data-ref="${ref}"]`);
+  });
+});
+
+test('the panel is defined once and mounted wherever a city is shown', () => {
+  // One markup string, three homes. If a fourth view is added it must mount the
+  // same panel rather than grow a fourth copy of the markup.
+  const markupDefinitions = appSource.match(/const CAMERA_PANEL_HTML = `/g) || [];
+  assert.equal(markupDefinitions.length, 1, 'the panel markup is duplicated');
+  assert.match(appSource, /\$\{CAMERA_PANEL_HTML\}/, 'the climate card does not use the shared panel');
+  assert.match(html, /id="glance-camera-slot"/, 'the dashboard has no place for the city camera');
+  assert.match(html, /id="compare-cameras"/, 'the comparison has no place for the city cameras');
+  ['syncGlanceCamera', 'renderCompareCameras', 'mountCameraPanel'].forEach((fn) => {
+    assert.match(appSource, new RegExp(`function ${fn}\\(`), `${fn} is missing`);
   });
 });
 
@@ -74,18 +95,24 @@ test('the panel starts hidden, so a city with no camera shows nothing at all', (
   assert.match(appSource, /<p class="city-camera-note" data-ref="cameraNote" hidden>/);
 });
 
-test('the frame is lazy and async decoded, because a grid of them is expensive', () => {
+test('the panel is lazy and async decoded, because a grid of them is expensive', () => {
   assert.match(appSource, /data-ref="cameraImage"[^>]*loading="lazy"/);
   assert.match(appSource, /data-ref="cameraImage"[^>]*decoding="async"/);
+  // A stream is a live connection, so the video must not be preloaded: `none`
+  // keeps the browser from opening it before the card is on screen.
+  assert.match(appSource, /data-ref="cameraVideo"[^>]*preload="none"/);
 });
 
 test('the pause control is a real button with a pressed state', () => {
   assert.match(appSource, /<button[\s\S]{0,300}class="city-camera-toggle"[\s\S]{0,300}aria-pressed="false"/);
 });
 
-test('the card carries the city id the observer resolves panels by', () => {
+test('every panel carries the id the observer resolves it by', () => {
   assert.match(appSource, /card\.dataset\.cityId = city\.id/);
-  assert.match(appSource, /entry\.target\.dataset\.cityId/);
+  assert.match(appSource, /refs\.camera\.dataset\.cameraPanel = refs\.cameraPanelId/);
+  assert.match(appSource, /entry\.target\.dataset\.cameraPanel/);
+  assert.match(appSource, /cameraState\.panels\.set\(refs\.cameraPanelId, refs\)/,
+    'a mounted panel is never registered, so the observer cannot reach it');
 });
 
 // ==========================================================================
@@ -118,8 +145,8 @@ test('a frame that fails to load leaves the rest of the card intact', () => {
 // 3. XSS: the feed URL is a third-party string
 // ==========================================================================
 test('the feed URL is only ever assigned as an attribute', () => {
-  const assignments = appSource.match(/cameraImage\.src = [^;]+;/g) || [];
-  assert.ok(assignments.length >= 2, 'the frame is assigned in more than one place');
+  const assignments = appSource.match(/(?:cameraImage\.src|cameraVideo\.src|video\.src) = [^;]+;/g) || [];
+  assert.ok(assignments.length >= 2, 'the media sources are assigned in fewer places than expected');
   assignments.forEach((line) => {
     assert.doesNotMatch(line, /innerHTML|insertAdjacentHTML|outerHTML/,
       'a third-party URL must never be parsed as markup');
@@ -127,9 +154,10 @@ test('the feed URL is only ever assigned as an attribute', () => {
 });
 
 test('no camera field is written with innerHTML', () => {
-  const painted = appSource.slice(appSource.indexOf('function paintCameraCard'));
-  const end = painted.indexOf('function cameraFrameUrl');
-  const body = end === -1 ? painted : painted.slice(0, end);
+  const from = appSource.indexOf('function paintCameraCard');
+  const to = appSource.indexOf('// --- Polling');
+  assert.ok(from !== -1 && to > from, 'the paint helpers are not where the test expects them');
+  const body = appSource.slice(from, to);
   assert.doesNotMatch(body, /innerHTML/, 'the camera panel must be painted with textContent and attributes');
 });
 
@@ -151,14 +179,14 @@ test('lookups are spaced, so a fast scroll cannot burst the directory', () => {
 
 test('the "no camera" answer is cached like any other, so a re-sort never re-asks', () => {
   assert.match(appSource, /writeCameraCache\(city\.id, record\)/);
-  assert.match(appSource, /readCameraCache\(city\.id\)/);
+  assert.match(appSource, /readCameraCache\(cityIdOf\(city\)\)/);
 });
 
 test('camera answers live in session storage, never in local storage', () => {
   // A camera's answer is true for a minute, so persisting it past the visit
   // would be a stale claim about a place.
   const from = appSource.indexOf('function readCameraCache');
-  const to = appSource.indexOf('// --- Painting one card');
+  const to = appSource.indexOf('// --- Painting one panel');
   assert.ok(from !== -1 && to > from, 'the camera cache helpers are not where the test expects them');
   const body = appSource.slice(from, to);
   assert.match(body, /sessionStorage/);
@@ -167,7 +195,64 @@ test('camera answers live in session storage, never in local storage', () => {
 
 test('the anonymous rate-limit budget stops the app asking again', () => {
   assert.match(appSource, /isBudgetExhausted/);
-  assert.match(appSource, /budgetSpent/);
+  assert.match(appSource, /blockCameraLookups\(\)/);
+  assert.match(appSource, /CAMERA_RETRY_COOLDOWN_MS/);
+});
+
+test('being throttled is not cached as "no camera here"', () => {
+  // The regression this guards: a 429 used to be stored as a definitive "none",
+  // so one unlucky request made the app deny cameras for the whole session.
+  const from = appSource.indexOf('async function resolveCityCamera');
+  const to = appSource.indexOf('function unknownCameraRecord');
+  assert.ok(from !== -1 && to > from, 'the lookup is not where the test expects it');
+  const body = appSource.slice(from, to);
+  assert.match(body, /return unknownCameraRecord\(city\)/,
+    'a blocked lookup has no "we were not allowed to ask" answer');
+  // Everything the lookup *does* persist is a real answer from the directory.
+  const failureBranch = body.slice(
+    body.indexOf('if (failure)'),
+    body.indexOf('const record = { status:')
+  );
+  assert.ok(failureBranch.length > 0, 'a failed lookup is never noticed');
+  assert.doesNotMatch(failureBranch, /writeCameraCache/,
+    'a transient failure is being written to the session cache');
+  const persisted = body.slice(body.indexOf('const record = { status:'));
+  assert.match(persisted, /writeCameraCache\(city\.id, record\)/);
+  assert.match(persisted, /cameras\.length \? 'found' : 'none'/);
+
+  const unknown = appSource.slice(to, appSource.indexOf('function blockCameraLookups'));
+  assert.match(unknown, /status: 'unknown'/, 'the blocked answer does not say why it is unknown');
+  assert.doesNotMatch(unknown, /writeCameraCache/,
+    'the blocked answer is cached, so the city can never be asked about again');
+});
+
+test('the cooldown ends by itself, so a temporary 429 is not permanent', () => {
+  const from = appSource.indexOf('function blockCameraLookups');
+  const to = appSource.indexOf('function cityIdOf');
+  assert.ok(from !== -1 && to > from, 'the cooldown is not where the test expects it');
+  const body = appSource.slice(from, to);
+  assert.match(body, /setTimeout/, 'the block is never lifted');
+  assert.match(body, /refreshCityCameras\(\)/, 'nothing re-asks when the cooldown expires');
+  assert.match(body, /status === 'unknown'[\s\S]*cameraState\.records\.delete/,
+    'the blocked answers are kept, so the retry can never happen');
+});
+
+test('the badge only claims motion where there is motion', () => {
+  // A polled still that says "Live" is a claim the picture cannot support.
+  assert.match(appSource, /function cameraBadgeLabel/);
+  assert.match(appSource, /camera\.still/, 'a still feed is labelled exactly like a stream');
+  assert.match(appSource, /isPlayableStream\(camera\)\s*\?\s*t\('camera\.live'/);
+});
+
+test('a stream is played, not polled', () => {
+  const from = appSource.indexOf('function syncCameraPolling');
+  const end = appSource.indexOf('async function requestCityCamera');
+  const slice = appSource.slice(from, end);
+  assert.match(slice, /(isStreamFeed|engine\.isStream)\(camera\)/,
+    'a stream is polled as if it were a still, tearing the connection down on every tick');
+  const timer = slice.slice(slice.indexOf('setTimeout'));
+  assert.doesNotMatch(timer, /cameraImage\.src/,
+    'the still path is the only one allowed to assign a fresh frame');
 });
 
 test('nothing is fetched for cameras until the grid is actually searched', () => {
@@ -199,10 +284,64 @@ test('polling only runs while the card is on screen and unpaused', () => {
     'an off-screen or paused card keeps its timer running');
 });
 
-test('pausing releases the image as well as the timer', () => {
+test('pausing releases the media as well as the timer', () => {
   assert.match(appSource, /refs\.cameraImage\.removeAttribute\('src'\)/,
     'a paused camera still holds the image it was not allowed to show');
   assert.match(appSource, /refs\.cameraBadge\.hidden = true/);
+  assert.match(appSource, /refs\.cameraVideo\.pause\(\)/,
+    'a paused panel leaves the stream running behind a dim frame');
+});
+
+test('the frame timestamp is read before it is written', () => {
+  // The frozen-frame bug: stamping `cameraFrameShownAt` before asking for the URL
+  // made the elapsed time zero, so no cache-buster was added and the browser was
+  // handed back the identical URL it already had cached - forever.
+  const from = appSource.indexOf('function applyCameraFrame');
+  const to = appSource.indexOf('function setCameraPausedState');
+  assert.ok(from !== -1 && to > from, 'applyCameraFrame is not where the test expects it');
+  const body = appSource.slice(from, to);
+
+  const read = body.indexOf('const shownAt = refs.cameraFrameShownAt');
+  const clock = body.indexOf('const now = Date.now()');
+  const url = body.indexOf('engine.nextFrameUrl(camera, now)');
+  const write = body.indexOf('refs.cameraFrameShownAt = now');
+
+  assert.ok(read !== -1, 'the previous frame time is never read');
+  assert.ok(clock !== -1, 'the function never asks the clock what time it is');
+  assert.ok(url > clock && url > read, 'the URL is built before the previous frame time is known');
+  assert.ok(write > url, 'the frame time is written before the URL is built, so the same URL comes back');
+});
+
+test('a re-render reuses the frame on screen instead of asking the source again', () => {
+  const from = appSource.indexOf('function applyCameraFrame');
+  const to = appSource.indexOf('function setCameraPausedState');
+  const body = appSource.slice(from, to);
+
+  // The cadence rule belongs to the engine, so the controller asks it rather than
+  // keeping a second copy of "when is this frame stale".
+  assert.match(body, /engine\.frameIsCurrent\(camera, now, \{ frameBase: shownAt \}\)/,
+    'the panel cannot tell whether the frame it is showing is still current');
+  assert.match(body, /if \(url && url !== showing\)/,
+    'the same URL is assigned again, which is a request the browser may not make');
+});
+
+test('releasing the media forgets the frame time, so nothing stale is reused', () => {
+  const from = appSource.indexOf('function releaseCameraMedia');
+  const to = appSource.indexOf('// --- Resolving one city');
+  assert.ok(from !== -1 && to > from, 'releaseCameraMedia is not where the test expects it');
+  const body = appSource.slice(from, to);
+  assert.match(body, /refs\.cameraFrameShownAt = 0/,
+    'a released panel still believes it is showing a frame, so the browser is handed its cached copy');
+});
+
+test('going off screen hands back the connection, not just the timer', () => {
+  const from = appSource.indexOf('function setCardCameraVisible');
+  const to = appSource.indexOf('function refreshCityCameras');
+  assert.ok(from !== -1 && to > from, 'the visibility handler is not where the test expects it');
+  const body = appSource.slice(from, to);
+  assert.match(body, /stopCameraPolling\(refs\)/);
+  assert.match(body, /releaseCameraMedia\(refs\)/,
+    'an off-screen MJPEG stream stays connected');
 });
 
 // ==========================================================================
@@ -213,9 +352,11 @@ test('every camera class the renderer uses is styled', () => {
     '.city-camera',
     '.city-camera-frame',
     '.city-camera-image',
+    '.city-camera-video',
     '.city-camera-badge',
     '.city-camera-live-dot',
     '.city-camera-toggle',
+    '.city-camera-next',
     '.city-camera-caption',
     '.city-camera-name',
     '.city-camera-distance',
@@ -223,9 +364,26 @@ test('every camera class the renderer uses is styled', () => {
     '.city-camera-note',
     '.camera-toggle',
     '.climate-controls-row',
+    '.glance-camera-slot',
+    '.compare-cameras',
+    '.compare-camera-cell',
+    '.compare-camera-city',
+    '.compare-camera-mount',
   ].forEach((selector) => {
     assert.ok(css.includes(selector), `${selector} is used but never styled`);
   });
+});
+
+test('the master switch is reachable from every view, not just the climate grid', () => {
+  // Cameras now appear on the dashboard and in the comparison too, so a switch
+  // buried in the climate results header left those two views uncontrollable.
+  const toggle = html.indexOf('id="camera-toggle"');
+  const header = html.indexOf('class="header-controls"');
+  const climateControls = html.indexOf('class="climate-controls-row"');
+  assert.ok(toggle !== -1, 'the camera toggle is missing');
+  assert.ok(header !== -1 && toggle > header, 'the camera toggle is not in the header');
+  assert.ok(climateControls === -1 || toggle < climateControls,
+    'the camera toggle is still only reachable from the climate results');
 });
 
 test('the panel keeps its shape on a phone instead of collapsing', () => {
@@ -241,6 +399,7 @@ test('the live badge is honest about motion and the pulse respects the reader', 
 
 test('the controls are keyboard reachable', () => {
   assert.match(css, /\.city-camera-toggle:focus-visible/);
+  assert.match(css, /\.city-camera-next:focus-visible/);
   assert.match(css, /\.camera-toggle:focus-visible/);
 });
 

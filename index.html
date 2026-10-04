@@ -168,6 +168,24 @@
           </span>
         </div>
 
+        <!-- Live camera master switch. It lives in the header rather than in the
+             climate results controls because cameras now appear in every view
+             that shows a city - the climate grid, the comparison rows and the
+             selected city on the dashboard - and a switch that is only reachable
+             in one of them would leave the other two uncontrollable. -->
+        <button
+          type="button"
+          class="camera-toggle"
+          id="camera-toggle"
+          aria-pressed="true"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2.5 7.5h11v9h-11z" />
+            <path d="M13.5 11l6-3.5v9l-6-3.5" />
+          </svg>
+          <span data-ref="cameraToggleLabel" data-i18n="camera.toggleOn">Live cameras on</span>
+        </button>
+
         <div class="unit-toggle" role="radiogroup" aria-label="Temperature unit selection" data-i18n-aria-label="nav.unitAria">
           <button type="button" class="unit-btn active" data-unit="celsius" id="unit-c" role="radio" aria-checked="true">°C</button>
           <button type="button" class="unit-btn" data-unit="fahrenheit" id="unit-f" role="radio" aria-checked="false">°F</button>
@@ -295,18 +313,6 @@
           <div class="climate-results-controls">
             <div class="climate-active-tags" id="climate-active-tags"></div>
             <div class="climate-controls-row">
-              <button
-                type="button"
-                class="camera-toggle"
-                id="camera-toggle"
-                aria-pressed="true"
-              >
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M2.5 7.5h11v9h-11z" />
-                  <path d="M13.5 11l6-3.5v9l-6-3.5" />
-                </svg>
-                <span data-ref="cameraToggleLabel" data-i18n="camera.toggleOn">Live cameras on</span>
-              </button>
               <div class="climate-sort-wrapper">
                 <label for="climate-sort-select" class="sort-label" data-i18n="climate.sortLabel">Sort:</label>
                 <!-- Options are rebuilt from the active climate filter on every render:
@@ -343,8 +349,11 @@
             Search above or tap a popular city to build a list, then compare 2 to 4 places.
           </p>
 
-          <!-- One row per selected location, injected by app.js -->
+          <!-- One row per selected location, injected by app.js. Each row also
+               carries that city's camera panel, so a comparison is answered by
+               the same live view a single city gets. -->
           <div class="compare-slots" id="compare-slots"></div>
+          <div class="compare-cameras" id="compare-cameras" aria-label="Live cameras for the compared locations" data-i18n-aria-label="camera.compareAria"></div>
 
           <div class="compare-actions">
             <button type="button" class="btn btn-secondary compare-action-btn" id="compare-add-btn">
@@ -472,6 +481,11 @@
               <span class="glance-wear-detail" id="glance-wear-detail"></span>
             </p>
           </div>
+
+          <!-- The selected city's camera. Same panel as every other city view,
+               mounted by app.js; the markup is injected so the controls cannot
+               drift from the ones the climate cards use. -->
+          <div class="glance-camera-slot" id="glance-camera-slot"></div>
         </section>
 
         <!-- Hero Weather Card -->

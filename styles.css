@@ -1147,7 +1147,8 @@ body {
   background: rgba(6, 12, 26, 0.75);
 }
 
-.city-camera-image {
+.city-camera-image,
+.city-camera-video {
   display: block;
   width: 100%;
   height: 100%;
@@ -1155,6 +1156,56 @@ body {
   /* A frame that never loads must not collapse the frame box and jump the
      rest of the card down. */
   min-height: 100%;
+}
+
+.city-camera-image[hidden],
+.city-camera-video[hidden] {
+  display: none;
+}
+
+/* A paused panel is dimmed rather than removed: the last frame stays on screen
+   so the card does not change height when the visitor pauses it. */
+.city-camera[data-paused='true'] .city-camera-frame {
+  opacity: 0.45;
+  transition: opacity var(--transition-fast);
+}
+
+.city-camera[data-paused='true'] .city-camera-live-dot {
+  animation: none;
+  background: var(--text-dim);
+  box-shadow: none;
+}
+
+/* Cycling to another camera in range. Only rendered when the directory found
+   more than one, so it is absent rather than disabled for most cities. */
+.city-camera-next {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(6, 12, 26, 0.78);
+  color: var(--text-primary);
+  font-size: 0.66rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.city-camera-next[hidden] {
+  display: none;
+}
+
+.city-camera-next:hover {
+  background: rgba(18, 30, 56, 0.92);
+  border-color: rgba(255, 255, 255, 0.34);
+}
+
+.city-camera-next:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
 }
 
 .city-camera-badge {
@@ -1269,7 +1320,51 @@ body {
   .city-camera { margin-top: 10px; }
   .city-camera-caption { font-size: 0.7rem; }
   .city-camera-badge,
-  .city-camera-toggle { font-size: 0.64rem; padding: 2px 7px; }
+  .city-camera-toggle,
+  .city-camera-next { font-size: 0.64rem; padding: 2px 7px; }
+}
+
+/* --- Live camera panels outside the climate grid ---------------------------
+   The panel is one component with three homes: a climate result card, the
+   dashboard's glance card, and a comparison row. Only the surroundings differ,
+   so the frame, badge, controls and caption styling above is shared verbatim
+   and these rules are the little that each layout adds on top. */
+
+/* Dashboard: the selected city's camera, below the verdict and "what to wear". */
+.glance-camera-slot:not(:empty) {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glance-camera-slot .city-camera {
+  margin-top: 0;
+}
+
+/* Comparison: one cell per compared city, in the order they were picked. */
+.compare-cameras:not(:empty) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.compare-camera-cell {
+  min-width: 0;
+}
+
+.compare-camera-city {
+  margin: 0 0 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.compare-camera-mount .city-camera {
+  margin-top: 0;
 }
 
 /* --- Live cameras on/off switch ------------------------------------------ */
@@ -2211,7 +2306,13 @@ body {
    than a full fill, so the text keeps its AAA contrast on every theme.
    ========================================================================== */
 
+/* The advice card is the one dashboard card that used to sit in a single column
+   of the two-column grid, which forced the two subcards into half a column
+   each. Every other card spans the full width, and so does this one: the pair
+   is the unit of meaning ("bring this *and* that"), so the card is widened
+   rather than the subcards shrunk. */
 .assistant-card {
+  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -2281,13 +2382,14 @@ body {
 
 /* The advice row is two subcards at every width, including the narrowest
    phones: the pair is the unit of meaning ("bring this *and* that"), so it is
-   never collapsed to a single column. What shrinks instead is the padding and
-   the type inside each tile - see the media queries below, which must stay
+   never collapsed to a single column. What shrinks instead - and only below
+   tablet width, where the viewport itself is the constraint - is the padding
+   and the type inside each tile. See the media queries below, which must stay
    after the base rules to win the cascade. */
 .assistant-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 18px;
   width: 100%;
 }
 
@@ -2351,31 +2453,30 @@ html[data-language-pending='true'] body {
   color: var(--text-secondary);
 }
 
-/* Narrow screens keep the pair but tighten it: the padding and internal gaps
-   come off first, then the type, so both subcards stay legible side by side. */
+/* Tablet and below: the pair is still the row, it just breathes less. Only the
+   spacing comes off here - the type stays at its base size, because the card is
+   now full width and a subcard has room to be read. */
 @media (max-width: 640px) {
   .assistant-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: 12px;
   }
-  .assistant-tile { padding: 11px 12px; gap: 6px; }
-  .assistant-tile-label { font-size: 0.72rem; }
-  .assistant-tile-headline { font-size: 0.92rem; line-height: 1.3; }
-  .assistant-tile-detail { font-size: 0.8rem; line-height: 1.45; }
-  .assistant-tile-icon { font-size: 0.95rem; }
+  .assistant-tile { padding: 12px 14px; gap: 7px; }
 }
 
+/* Phones: here the viewport is the constraint, so padding and type come off
+   together rather than the pair being broken up. */
 @media (max-width: 480px) {
-  .assistant-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .assistant-tile { padding: 9px 10px; gap: 5px; }
+  .assistant-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .assistant-tile { padding: 10px 11px; gap: 6px; }
   /* A long compound word must not be what widens a column that is half the
      viewport wide. */
   .assistant-tile-headline,
   .assistant-tile-detail { overflow-wrap: anywhere; }
-  .assistant-tile-label { font-size: 0.68rem; }
-  .assistant-tile-headline { font-size: 0.88rem; line-height: 1.25; }
-  .assistant-tile-detail { font-size: 0.76rem; line-height: 1.4; }
-  .assistant-tile-icon { font-size: 0.9rem; }
+  .assistant-tile-label { font-size: 0.7rem; }
+  .assistant-tile-headline { font-size: 0.9rem; line-height: 1.3; }
+  .assistant-tile-detail { font-size: 0.78rem; line-height: 1.42; }
+  .assistant-tile-icon { font-size: 0.92rem; }
 }
 
 /* --- "Rain during your ...?" window selector ----------------------------- */

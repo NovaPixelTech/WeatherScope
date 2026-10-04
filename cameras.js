@@ -45,24 +45,42 @@
    */
   const DIRECTORY_ENDPOINT = 'https://datumfeed.com/api/cameras';
 
-  /** Half-width of the search box around a city, in degrees (~28km of latitude). */
-  const BBOX_RADIUS_DEG = 0.25;
+  /**
+   * Half-width of the search box around a city, in degrees (~55km of latitude).
+   *
+   * Deliberately a whole neighbourhood rather than a single block: public
+   * cameras cluster where the traffic and the weather are - ports, mountain
+   * passes, ring roads - so a tight box around a city centre very often comes
+   * back empty while a camera is genuinely "in" the city a few kilometres out.
+   */
+  const BBOX_RADIUS_DEG = 0.5;
 
   /**
    * `minTrust` floor. The directory publishes cameras it has never polled with a
    * `null` score; those are excluded rather than treated as zero, so asking for
-   * a floor is how we get "has been seen working" instead of "is listed".
+   * a floor is how we get "has been seen working" instead of "is listed". The
+   * floor is low on purpose - a camera that has been polled a handful of times
+   * is still a camera, and refusing to show it costs the visitor the only view
+   * of their city.
    */
-  const MIN_TRUST = 20;
+  const MIN_TRUST = 10;
 
   /** How many candidates to pull before ranking them by distance. */
-  const CANDIDATE_LIMIT = 8;
+  const CANDIDATE_LIMIT = 12;
 
   /**
    * Fallback refresh cadence when a registry does not publish one. Snapshot
    * feeds are polled rather than streamed, so this is deliberately unhurried.
    */
   const DEFAULT_POLL_SECONDS = 60;
+
+  /**
+   * A camera that publishes a *stream* is preferred over an equally close
+   * snapshot-only camera, but only within this distance. Past it the snapshot
+   * wins: watching a harbour 40km away is not "the weather in this city", while
+   * a still of the nearest junction still is.
+   */
+  const STREAM_PREFERENCE_KM = 25;
 
   /** The directory rate-limits anonymous browsing; stop before it throttles us. */
   const MIN_REMAINING_BUDGET = 2;
@@ -108,6 +126,19 @@
    * One camera, reduced to exactly what the card renders. Anything the
    * directory sends that we do not understand is dropped rather than passed
    * through, because every field here ends up in the DOM.
+   *
+   * A camera can publish two very different things and the card renders them
+   * differently:
+   *
+   *  * **a stream** - `multipart/x-mixed-replace` (MJPEG), HLS or a plain file.
+   *    These are *video*: the browser keeps receiving frames, so the view moves.
+   *  * **a snapshot** - one still, re-fetched on a timer. Honest, but stills.
+   *
+   * Both are kept. `kind` says which one this is, `streamUrl` is the playable
+   * one when it exists, and `imageUrl` is a URL that can be drawn in an `<img>`
+   * - for an MJPEG camera that is the stream itself, which is exactly how MJPEG
+   * is played. An HLS or file camera may have no still at all, and then
+   * `imageUrl` is null and the feed is played in a `<video>` instead.
    */
   function normalizeCamera(raw, options) {
     const settings = options || {};
@@ -115,11 +146,24 @@
 
     const lat = numberOrNull(raw.lat);
     const lon = numberOrNull(raw.lon);
-    const imageUrl = safeUrl(raw.feedUrl);
-    if (imageUrl === null || lat === null || lon === null) return null;
-
     const registry = raw.registry && typeof raw.registry === 'object' ? raw.registry : {};
     const stats = raw.stats && typeof raw.stats === 'object' ? raw.stats : {};
+
+    const streamUrl = firstSafeUrl(raw, ['streamUrl', 'videoUrl', 'mjpegUrl', 'hlsUrl', 'stream']);
+    const kind = streamKind(raw, streamUrl);
+    // A stream camera needs no separate still: for MJPEG the stream *is* the
+    // image source, and for an HLS/file stream `imageUrl` is only the poster
+    // still, which a source is allowed not to publish.
+    const imageUrl = kind === 'mjpeg'
+      ? streamUrl
+      : safeUrl(raw.feedUrl);
+
+    // Something has to be drawable. An HLS or file camera may carry only a
+    // stream (its poster is optional), and an MJPEG camera is nothing but its
+    // stream, so a camera without either is not a camera we can render.
+    if (!imageUrl && (kind === 'snapshot' || kind === 'mjpeg')) return null;
+    if (lat === null || lon === null) return null;
+
     const pollSeconds = positiveInt(settings.pollSecondsByRegistry && settings.pollSecondsByRegistry[registry.slug]) ||
       positiveInt(registry.minPollIntervalS) ||
       DEFAULT_POLL_SECONDS;
@@ -130,12 +174,42 @@
       latitude: lat,
       longitude: lon,
       imageUrl,
+      kind,
+      streamUrl,
       pollSeconds,
       source: text(registry.name),
       attribution: text(registry.attribution),
       attributionUrl: safeUrl(registry.licenseUrl),
       trustScore: numberOrNull(stats.trustScore),
     };
+  }
+
+  /**
+   * What kind of feed this is.
+   *
+   * The directory names its stream fields in more than one way across versions,
+   * so the decision is made from the URL and the advertised content type rather
+   * than from one field name: a `.m3u8` is HLS, a `.mp4`/`.webm` is a file,
+   * `multipart/x-mixed-replace` is MJPEG, and anything else on a stream field
+   * is treated as MJPEG because that is what plays in an `<img>`.
+   */
+  function streamKind(raw, streamUrl) {
+    if (!streamUrl) return 'snapshot';
+    const contentType = text(raw.streamContentType || raw.contentType || raw.mimeType).toLowerCase();
+    if (contentType.indexOf('mpegurl') !== -1 || /\.m3u8(\?|$)/i.test(streamUrl)) return 'hls';
+    if (/\.(mp4|webm|ogv|mov)(\?|$)/i.test(streamUrl)) return 'file';
+    if (contentType.indexOf('mp4') !== -1 || contentType.indexOf('webm') !== -1) return 'file';
+    if (text(raw.streamProtocol).toLowerCase() === 'hls') return 'hls';
+    return 'mjpeg';
+  }
+
+  /** The first field of these names that is a usable http(s) URL. */
+  function firstSafeUrl(raw, names) {
+    for (let i = 0; i < names.length; i += 1) {
+      const url = safeUrl(raw[names[i]]);
+      if (url) return url;
+    }
+    return null;
   }
 
   /**
@@ -179,6 +253,33 @@
     return cameras[0] || null;
   }
 
+  /**
+   * What the card shows first.
+   *
+   * Nearest wins, with one exception that answers the request the feature was
+   * built for: a camera that publishes a *stream* beats an equally close
+   * snapshot-only camera, because a stream is actually moving. The exception is
+   * capped at `STREAM_PREFERENCE_KM` so "nearest" still means "nearest".
+   */
+  function bestCamera(cameras) {
+    const nearest = pickCamera(cameras);
+    if (!nearest || !Array.isArray(cameras)) return nearest;
+    if (isStream(nearest)) return nearest;
+
+    for (let i = 1; i < cameras.length; i += 1) {
+      const camera = cameras[i];
+      if (!camera || !isStream(camera)) continue;
+      if (typeof camera.distanceKm !== 'number' || camera.distanceKm > STREAM_PREFERENCE_KM) continue;
+      return camera;
+    }
+    return nearest;
+  }
+
+  /** True when this camera can play as video rather than as a polled still. */
+  function isStream(camera) {
+    return Boolean(camera) && camera.kind !== 'snapshot' && typeof camera.streamUrl === 'string' && camera.streamUrl !== '';
+  }
+
   // ==========================================================================
   // Rate limiting
   // ==========================================================================
@@ -207,19 +308,93 @@
    * Snapshot feeds are polled, not streamed, so the same URL has to be asked for
    * again to see a new frame - but no more often than the registry asks for, so
    * the cache-buster is only added once the cadence has elapsed.
+   *
+   * `frameBase` is *when the frame currently on screen was shown*, not when the
+   * refresh is being requested. Passing "now" here is what makes a polled frame
+   * sit there frozen: the elapsed time is always zero, the cache-buster is never
+   * added, and the browser is handed the identical URL it already has.
    */
   function frameUrl(camera, nowMs, options) {
     if (!camera || typeof camera.imageUrl !== 'string') return '';
     const settings = options || {};
     const now = typeof nowMs === 'number' ? nowMs : 0;
-    const cadenceMs = Math.max(1, positiveInt(camera.pollSeconds) || DEFAULT_POLL_SECONDS) * 1000;
-    const base = String(settings.frameBase || '');
-    if (!base || now - base < cadenceMs) return camera.imageUrl;
+    // A stream URL is a live connection, not a document. Adding a cache-buster
+    // to one would tear the connection down and ask the source to open another,
+    // which is the opposite of what a stream does by itself - so a stream's
+    // image source is never busted, however long ago it was shown.
+    if (isStream(camera)) return camera.imageUrl;
+    const cadenceMs = frameCadenceMs(camera);
+    const base = Number(settings.frameBase || 0);
+    if (!base || !Number.isFinite(base) || now - base < cadenceMs) return camera.imageUrl;
     return appendBust(camera.imageUrl, now);
   }
 
+  /**
+   * The URL for the next frame, unconditionally fresh.
+   *
+   * This is what the poller uses: by the time it fires, the cadence has already
+   * elapsed, so the question "should this be a new frame?" is answered. Asking
+   * `frameUrl` with a base of "now" is what froze the panel before.
+   */
+  function nextFrameUrl(camera, nowMs) {
+    if (!camera || typeof camera.imageUrl !== 'string') return '';
+    // Same rule as `frameUrl`: a stream is left exactly as it was published.
+    if (isStream(camera)) return camera.imageUrl;
+    return appendBust(camera.imageUrl, typeof nowMs === 'number' ? nowMs : 0);
+  }
+
+  /**
+   * How long this source wants to be left alone between frames.
+   *
+   * The floor is 15s whatever a registry publishes: a source asking to be polled
+   * every second is either broken or about to be blocked, and neither is worth a
+   * visitor's ban.
+   */
+  function frameCadenceMs(camera) {
+    const seconds = camera && Number.isFinite(camera.pollSeconds) && camera.pollSeconds > 0
+      ? camera.pollSeconds
+      : DEFAULT_POLL_SECONDS;
+    return Math.max(15, seconds) * 1000;
+  }
+
+  /**
+   * True when the frame on screen is still inside its cadence.
+   *
+   * This is the "is there anything to do?" half of the polling question, kept
+   * beside `frameUrl` so the cadence rule lives in one place: a card that is
+   * re-rendered - sorted, filtered, switched language - must reuse the frame it
+   * is already showing rather than ask the source for it again.
+   *
+   * A stream is never stale: the browser is holding it open and refreshing it.
+   */
+  function frameIsCurrent(camera, nowMs, options) {
+    if (!camera || typeof camera.imageUrl !== 'string') return false;
+    if (isStream(camera)) return true;
+    const base = Number((options || {}).frameBase || 0);
+    // No timestamp means nothing is known to be on screen, so nothing can be
+    // reused - which is exactly what keeps a released panel from being handed a
+    // URL the browser still has cached.
+    if (!base || !Number.isFinite(base)) return false;
+    const now = typeof nowMs === 'number' ? nowMs : 0;
+    return now - base < frameCadenceMs(camera);
+  }
+
+  /**
+   * The last stamp handed out for each frame URL.
+   *
+   * Millisecond resolution is not quite enough: two refreshes inside the same
+   * millisecond - a throttled tab catching up, a timer that fires twice before
+   * the clock has ticked - would produce the identical URL, and the browser would
+   * answer the second one from the cache it just filled. The stamp only ever
+   * moves forward, so every poll is a URL the browser has not seen.
+   */
+  const lastBustByUrl = new Map();
+
   function appendBust(url, stamp) {
-    return url + (url.indexOf('?') === -1 ? '?' : '&') + 'ws=' + stamp;
+    const previous = lastBustByUrl.get(url) || 0;
+    const next = typeof stamp === 'number' && stamp > previous ? stamp : previous + 1;
+    lastBustByUrl.set(url, next);
+    return url + (url.indexOf('?') === -1 ? '?' : '&') + 'ws=' + next;
   }
 
   // ==========================================================================
@@ -239,6 +414,13 @@
    * `fetchJson` is injected so the engine owns no network code of its own;
    * `pollSecondsByRegistry` is the cached `/api/registries` map, which supplies
    * each source's own polite refresh cadence.
+   *
+   * A failed request still returns an empty list - to a visitor, "we could not
+   * ask" and "there is nothing there" must look the same - but it is *reported*
+   * through `onFailure`. That distinction matters to the controller: an empty
+   * answer is worth caching for the session, a failed one is not, and caching a
+   * throttle as "no camera here" is how a city ends up falsely claiming to have
+   * no public camera for the rest of the visit.
    */
   async function findCameras(city, options) {
     const settings = options || {};
@@ -256,9 +438,13 @@
     try {
       body = await settings.fetchJson(url);
     } catch (err) {
+      if (settings.onFailure) settings.onFailure(err);
       return [];
     }
-    if (!body) return [];
+    if (!body) {
+      if (settings.onFailure) settings.onFailure(new Error('Camera directory returned no payload'));
+      return [];
+    }
 
     const cameras = parseCameraResponse(body, {
       latitude: lat,
@@ -333,6 +519,7 @@
     BBOX_RADIUS_DEG,
     MIN_TRUST,
     DEFAULT_POLL_SECONDS,
+    STREAM_PREFERENCE_KM,
     MIN_REMAINING_BUDGET,
     bboxFor,
     haversineKm,
@@ -340,9 +527,14 @@
     parseCameraResponse,
     rankByDistance,
     pickCamera,
+    bestCamera,
+    isStream,
+    streamKind,
     remainingBudget,
     isBudgetExhausted,
     frameUrl,
+    frameIsCurrent,
+    nextFrameUrl,
     cacheKey,
     findCameras,
   };

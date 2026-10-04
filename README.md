@@ -287,16 +287,20 @@ The dashboard, climate grid and suggestion dropdown all live inside `<main aria-
 
 ## 📷 Free live city cameras
 
-Every city in the climate grid shows a **free public camera view** of that same city, inside its own card — a forecast tells you what the sky will do, a camera tells you what it is doing.
+Anywhere the app shows a city, it can also show you what that city's sky is doing right now. One panel definition is mounted in **all three views** — the climate grid card, the selected city on the dashboard, and each city in the comparison — so a forecast and a live view of the same place sit next to each other instead of in a separate screen. A single switch in the header turns every one of them off.
 
 ### What it shows
 
 | | |
 | --- | --- |
-| **The frame** | A snapshot from the nearest free public camera, with its distance from the city centre and its own `Live` badge. |
+| **The frame** | Whatever the nearest free public camera actually publishes: a stream where it has one, a snapshot where it does not. |
+| **The badge is honest** | `Live` only where there is motion — an MJPEG or HLS stream playing. A polled snapshot is labelled **Live still**, because a still that refreshes every minute is not a live video and saying so would be a claim the app cannot support. |
+| **Streams vs stills** | An MJPEG stream plays in the `<img>` (that is how the format is delivered, and the browser keeps refreshing it by itself). HLS and file streams play in a `<video>`; if the browser refuses to autoplay one and the source publishes no still, the panel says **Camera unavailable** rather than leaving a black rectangle. |
+| **Next camera** | When the directory knows of more than one camera in range, the panel cycles through them without asking again. |
 | **Attribution** | The source's required wording, linked to its licence. Never omitted when the source supplies it. |
-| **Pause / Play** | A real toggle per card, so a frame refreshing every few minutes is motion you can turn off. |
-| **"No free public camera for this city"** | Shown when there isn't one. Most of the world has none, and the app says so rather than showing a placeholder. |
+| **Pause / Play** | A real toggle per panel, so a frame refreshing every few minutes is motion you can turn off. Pausing stops the timer *and* hands back the connection. |
+| **"No free public camera for this city"** | Shown when the directory says there is none. Most of the world has none, and the app says so rather than showing a placeholder. |
+| **"Camera lookup unavailable right now"** | Shown when the app was *not allowed to ask* — a throttle or a failure. It never pretends that "we could not check" means "there is nothing here". |
 
 ### Why it can be free
 
@@ -316,21 +320,27 @@ A city outside these gets one short line of text. Probing the directory for any 
 
 ### How it stays cheap and polite
 
-- **Lazy.** The directory is rate-limited to 60 anonymous requests/hour, so a card is only asked about once it is actually scrolled into view (`IntersectionObserver`, 200 px margin), with lookups spaced 900 ms apart. A 72-card filter does not become 72 simultaneous requests.
+- **Lazy.** The directory is rate-limited, so a panel is only asked about once it is actually scrolled into view (`IntersectionObserver`, 200 px margin), with lookups spaced 900 ms apart. A 72-card filter does not become 72 simultaneous requests.
 - **Cached for the session, including "nothing here".** Re-sorting or re-filtering never re-asks. Results live in `sessionStorage`, never `localStorage` — a camera's answer is true for about a minute.
-- **The source sets the cadence.** Each registry publishes how often it wants to be refreshed (TfL says 180 s, others 60 s), fetched once per session from `/api/registries` and applied per camera. The app never polls faster than the source asks.
-- **Polling only runs while a card is on screen, unpaused, and the camera switch is on.** Off-screen or paused cards hold no timer, and a paused card releases the image itself.
+- **A throttle is never cached as an answer.** This is the important one: caching "we were not allowed to ask" as "this city has no free public camera" is how a momentary 429 turns into a false claim about a city for the rest of the visit. Only `found` and `none` are cached; `unknown` is a statement about the network, and it lifts itself.
+- **The cooldown is five minutes and self-healing.** After a 429 or a failure the app stops asking, says the lookup is unavailable, and retries when the cooldown expires — rather than giving up for the whole session the way it used to.
+- **The source sets the cadence.** Each registry publishes how often it wants to be refreshed (fetched once per session from `/api/registries` and applied per camera, floored at 15 s whatever a source asks for). The app never polls faster than the source asks.
+- **A re-render is not a refresh.** Sorting the grid, switching language or re-running the panels leaves the frame already on screen alone until the cadence elapses; only the poller asks for a new one. Releasing a panel forgets when its frame was shown, so a returning panel can never be handed a cached picture.
+- **The cache-buster only moves forward.** Two polls inside the same millisecond — a throttled tab catching up — would otherwise produce the identical URL and the browser would answer the second from the cache the first filled.
+- **A stream is never cache-busted.** Adding a parameter to a live connection tears it down and asks the source to open another, which is the opposite of what a stream does by itself.
+- **Polling only runs while a panel is on screen, unpaused, and the switch is on.** Off-screen or paused panels hold no timer and release their media; so does the master switch.
 - **The budget is respected before it is spent.** `x-ratelimit-remaining` is read from the response headers and the app stops asking with two requests left, rather than getting throttled.
-- **Nothing happens until you search.** No camera request is made at page load; the observer is only attached when the climate grid is rendered.
+- **Nothing happens until you search.** No camera request is made at page load; the observer is only attached when a grid is rendered.
 
 ### Accessibility
 
-The frame is `loading="lazy"` and `decoding="async"`, with an `alt` that names the place. The `Live` badge's pulse is disabled under `prefers-reduced-motion`. The pause control is a real `<button>` with `aria-pressed`, and both it and the header switch have visible focus rings — and because the card itself is a `role="button"`, the panel's clicks and key presses stop there instead of opening the city.
+The frame is `loading="lazy"` and `decoding="async"`, with an `alt` that names the place. The `Live` badge's pulse is disabled under `prefers-reduced-motion`. The pause control is a real `<button>` with `aria-pressed`, and both it and the header switch have visible focus rings — and because the card itself is a `role="button"`, the panel's clicks and key presses stop there instead of opening the city. The comparison's camera strip is labelled for screen readers.
 
 ### Design decisions
 
 - **`cameras.js` is pure**, like `advice.js` / `glance.js` / `compare.js`: no DOM, no network, no clock of its own. `findCameras` is handed a `fetchJson`, and the current time is passed in. That is what keeps it testable in plain Node.
-- **The panel lives in the card, not in a separate view.** It is the same information in a different tense — a forecast row and a live view of the same place — so it belongs in the same place.
+- **One panel definition, mounted wherever a city is shown.** `CAMERA_PANEL_HTML` is written once and `mountCameraPanel` adopts it into any host, so the grid, the glance card and the comparison cannot drift apart.
+- **One registry of panels.** Every mounted panel is registered by id, so one observer, one switch and one `refreshCityCameras` drive all of them — and dropping a comparison releases the panels it was holding.
 - **The feed URL is only ever assigned as an attribute**, never parsed as markup, and only `http(s)` survives normalisation. Fields the directory adds that we do not understand are dropped rather than forwarded, because every normalised field ends up in the DOM.
 - **A camera the directory flags `contradicted` is never shown** — a dead feed or misplaced pin in a weather card is worse than no frame.
 - **Coordinates that are absent are rejected, not coerced.** `Number(null)` is `0`, so a naive parse would place a camera with `"lat": null` in the Gulf of Guinea and rank it as the nearest thing on earth.
@@ -338,10 +348,17 @@ The frame is `loading="lazy"` and `decoding="async"`, with an `alt` that names t
 ### Running the tests
 
 ```bash
-node --test tests/cameras.test.js        # the engine
-node --test tests/camera-wiring.test.js  # the glue to the page
-node tools/probe-cameras.js             # the real directory, by hand
+node --test tests/cameras.test.js         # the engine
+node --test tests/camera-runtime.test.js  # the controller, in a small DOM
+node --test tests/camera-wiring.test.js   # the glue to the page
+node tools/probe-cameras.js              # the real directory, by hand
 ```
+
+`camera-runtime.test.js` runs the real controller source in a sandbox with a
+stub DOM, a fake directory and a controllable clock, so the parts that are easy
+to get wrong — lazy lookup, playback by feed type, the polled-still cadence,
+throttling, and releasing a panel — are asserted as behaviour rather than as a
+pattern in the source.
 
 ---
 

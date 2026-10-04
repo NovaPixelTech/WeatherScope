@@ -120,7 +120,7 @@ test('fields the directory adds that we do not understand are dropped, not forwa
   assert.equal(camera.somethingUnexpected, undefined);
   assert.deepEqual(
     Object.keys(camera).sort(),
-    ['attribution', 'attributionUrl', 'distanceKm', 'id', 'imageUrl', 'latitude', 'longitude', 'name', 'pollSeconds', 'source', 'trustScore'].filter((k) => k in camera).sort(),
+    ['attribution', 'attributionUrl', 'distanceKm', 'id', 'imageUrl', 'kind', 'latitude', 'longitude', 'name', 'pollSeconds', 'source', 'streamUrl', 'trustScore'].filter((k) => k in camera).sort(),
     'the normalised shape is closed to whatever the directory sends'
   );
 });
@@ -286,4 +286,132 @@ test('the session cache key is per city and safe to use as a storage key', () =>
   assert.match(key, /san-francisco$/);
   assert.doesNotMatch(key, /[^a-z0-9_-]/i, 'no characters that would need escaping in a storage key');
   assert.notEqual(C.cacheKey('paris'), C.cacheKey('london'));
+});
+
+// ==========================================================================
+// Streams: what the browser can actually play
+// ==========================================================================
+
+test('a camera that publishes a stream is recognised as one, whatever it calls the field', () => {
+  const mjpeg = C.normalizeCamera(rawCamera({ feedUrl: null, streamUrl: 'https://example.org/live' }));
+  assert.equal(mjpeg.kind, 'mjpeg');
+  assert.equal(mjpeg.streamUrl, 'https://example.org/live');
+  // For MJPEG the stream *is* the image source - that is how MJPEG is played.
+  assert.equal(mjpeg.imageUrl, 'https://example.org/live');
+  assert.equal(C.isStream(mjpeg), true);
+
+  const hls = C.normalizeCamera(rawCamera({ feedUrl: null, hlsUrl: 'https://example.org/live/index.m3u8' }));
+  assert.equal(hls.kind, 'hls');
+  assert.equal(hls.streamUrl, 'https://example.org/live/index.m3u8');
+  // An HLS camera needs no still: the poster is optional, so `imageUrl` is null
+  // and the app plays it in a <video> rather than pretending to have a frame.
+  assert.equal(hls.imageUrl, null);
+  assert.equal(C.isStream(hls), true);
+
+  const file = C.normalizeCamera(rawCamera({ streamUrl: 'https://example.org/live.mp4' }));
+  assert.equal(file.kind, 'file');
+
+  const snapshot = C.normalizeCamera(rawCamera());
+  assert.equal(snapshot.kind, 'snapshot');
+  assert.equal(C.isStream(snapshot), false);
+});
+
+test('the content type decides what a stream is, not the extension alone', () => {
+  const typed = C.normalizeCamera(rawCamera({
+    feedUrl: null,
+    streamUrl: 'https://example.org/channel',
+    streamContentType: 'application/vnd.apple.mpegurl',
+  }));
+  assert.equal(typed.kind, 'hls');
+});
+
+test('a camera with neither a stream nor a still is not a camera we can render', () => {
+  assert.equal(C.normalizeCamera(rawCamera({ feedUrl: null })), null);
+  assert.equal(C.normalizeCamera(rawCamera({ feedUrl: null, streamUrl: 'javascript:alert(1)' })), null);
+});
+
+test('a stream is never cache-busted, because that would restart it every tick', () => {
+  const camera = C.normalizeCamera(rawCamera({ feedUrl: null, streamUrl: 'https://example.org/live' }));
+  // Even long past any cadence, the poller must hand the browser the same URL:
+  // the stream keeps pushing frames on its own.
+  assert.equal(C.frameUrl(camera, 5000000, { frameBase: 0 }), 'https://example.org/live');
+  assert.equal(C.frameUrl(camera, 5000000, { frameBase: 1000 }), 'https://example.org/live');
+});
+
+test('the poller asks for a new still unconditionally, because its clock already answered', () => {
+  // This is the frozen-frame regression at the engine level: `frameUrl` given a
+  // base of "now" always says "not yet", so a poller that trusted it never asked
+  // for anything new. `nextFrameUrl` is the unconditional answer.
+  const camera = C.normalizeCamera(rawCamera());
+  assert.equal(C.frameUrl(camera, 2000000, { frameBase: 2000000 }), 'https://example.org/frame.jpg');
+
+  const fresh = C.nextFrameUrl(camera, 2000000);
+  assert.notEqual(fresh, 'https://example.org/frame.jpg');
+  assert.match(fresh, /^https:\/\/example\.org\/frame\.jpg\?ws=2000000$/);
+
+  // A URL that already carries a query gets a second parameter, not a second `?`.
+  const withQuery = C.normalizeCamera(rawCamera({ feedUrl: 'https://example.org/frame.jpg?v=2' }));
+  assert.match(C.nextFrameUrl(withQuery, 5), /\?v=2&ws=5$/);
+});
+
+test('two polls inside the same millisecond still produce two different URLs', () => {
+  // Millisecond stamps are not enough on their own: a throttled tab can catch up
+  // with two ticks before the clock has moved, and the browser would answer the
+  // second one from the cache the first one filled.
+  const camera = C.normalizeCamera(rawCamera());
+  const first = C.nextFrameUrl(camera, 4242);
+  const second = C.nextFrameUrl(camera, 4242);
+
+  assert.notEqual(second, first, 'the same frame URL was handed out twice');
+  assert.match(second, /\?ws=\d+$/);
+  const stamp = (url) => Number(String(url).split('ws=')[1]);
+  assert.ok(stamp(second) > stamp(first), 'the cache-buster did not move forward');
+});
+
+test('frameIsCurrent answers "may this frame be reused?" and defaults to no', () => {
+  const camera = C.normalizeCamera(rawCamera());  // the fixture's registry asks for 60s
+  const base = 1000000;
+
+  assert.equal(C.frameIsCurrent(camera, base + 59000, { frameBase: base }), true,
+    'a frame inside the cadence is not being re-fetched');
+  assert.equal(C.frameIsCurrent(camera, base + 60000, { frameBase: base }), false,
+    'a frame past the cadence is stale');
+
+  // Nothing known on screen: nothing may be reused, or the browser answers with
+  // the copy it cached before the panel was released.
+  assert.equal(C.frameIsCurrent(camera, base, { frameBase: 0 }), false);
+  assert.equal(C.frameIsCurrent(camera, base, {}), false);
+  assert.equal(C.frameIsCurrent(camera, base, { frameBase: 'nonsense' }), false);
+  assert.equal(C.frameIsCurrent(null, base, { frameBase: base }), false);
+
+  // A stream is never stale: the browser is holding it open already.
+  const stream = C.normalizeCamera(rawCamera({ feedUrl: null, streamUrl: 'https://example.org/live' }));
+  assert.equal(C.frameIsCurrent(stream, base + 10 * 60 * 1000, { frameBase: base }), true);
+});
+
+test('a source asking to be polled absurdly often is floored, not obeyed', () => {
+  const camera = C.normalizeCamera(rawCamera({ registry: { slug: 'eager', name: 'Eager', minPollIntervalS: 1 } }));
+  assert.equal(camera.pollSeconds, 1);
+  // 1s is what the registry asked for and 15s is what the app will do.
+  assert.equal(C.frameIsCurrent(camera, 1000000 + 14000, { frameBase: 1000000 }), true);
+  assert.equal(C.frameIsCurrent(camera, 1000000 + 16000, { frameBase: 1000000 }), false);
+});
+
+test('a camera that can play is chosen over an equally close still, but not over a near one', () => {
+  const still = Object.assign(C.normalizeCamera(rawCamera({ id: 'still', lat: 51.5, lon: -0.12 })), { distanceKm: 1 });
+  const stream = Object.assign(
+    C.normalizeCamera(rawCamera({ id: 'stream', lat: 51.51, lon: -0.13, feedUrl: null, streamUrl: 'https://example.org/live' })),
+    { distanceKm: 2 }
+  );
+  const distantStream = Object.assign(
+    C.normalizeCamera(rawCamera({ id: 'far', lat: 52.0, lon: -0.1, feedUrl: null, streamUrl: 'https://example.org/live2' })),
+    { distanceKm: 60 }
+  );
+
+  assert.equal(C.pickCamera([still, stream]).id, 'still', 'nearest first, always');
+  assert.equal(C.bestCamera([still, stream]).id, 'stream', 'a moving view beats a still at the same distance');
+  assert.equal(C.bestCamera([still, distantStream]).id, 'still',
+    'past the preference radius, "nearest" has to mean nearest again');
+  assert.equal(C.bestCamera([stream, still]).id, 'stream', 'a stream that is nearest is simply kept');
+  assert.equal(C.bestCamera([]), null);
 });

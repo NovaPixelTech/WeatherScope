@@ -752,6 +752,11 @@
     glanceWearIcon: document.getElementById('glance-wear-icon'),
     glanceWearHeadline: document.getElementById('glance-wear-headline'),
     glanceWearDetail: document.getElementById('glance-wear-detail'),
+    glanceCameraSlot: document.getElementById('glance-camera-slot'),
+
+    // The selected city's camera panel. Built once by app.js and re-pointed at
+    // each new city, so a search does not leave the previous stream running.
+    glanceCameraPanel: null,
 
     // The shareable cards. A shared link names these keys, and each key maps to
     // exactly one section id, so the recipient lands on the card the sender was
@@ -846,6 +851,7 @@
     mainContent: document.getElementById('main-content'),
     compareCount: document.getElementById('compare-count'),
     compareSlots: document.getElementById('compare-slots'),
+    compareCameras: document.getElementById('compare-cameras'),
     compareAddBtn: document.getElementById('compare-add-btn'),
     compareRunBtn: document.getElementById('compare-run-btn'),
     compareClearBtn: document.getElementById('compare-clear-btn'),
@@ -1769,6 +1775,7 @@
     // confident-sounding blank.
     if (!glance || !glance.ok) {
       card.hidden = true;
+      syncGlanceCamera(null);
       return;
     }
 
@@ -1801,6 +1808,11 @@
 
     // --- What to wear --------------------------------------------------------
     renderGlanceWear(data);
+
+    // --- The city's camera ---------------------------------------------------
+    // Mounted last so the panel is only built once the card is actually visible;
+    // a card that never shows should never hold a stream open.
+    syncGlanceCamera(state.currentCity);
   }
 
   /**
@@ -2678,6 +2690,70 @@
 // ==========================================================================
 // Climate Search Results Rendering
 // ==========================================================================
+  /**
+   * The camera panel, once.
+   *
+   * Every city card in the app - the climate grid, each comparison slot and the
+   * selected city on the dashboard - carries the same panel, so the markup lives
+   * here and is mounted wherever a city is shown. It has two media elements on
+   * purpose: a camera that publishes a stream is *played* in the `<video>`, and
+   * a camera that publishes only stills is polled in the `<img>`. Exactly one of
+   * them is visible at a time, and a city with no camera keeps the whole figure
+   * hidden and gets one line of text from `.city-camera-note` instead.
+   */
+  const CAMERA_PANEL_HTML = `
+    <figure class="city-camera" data-ref="camera" hidden>
+      <div class="city-camera-frame">
+        <img class="city-camera-image" data-ref="cameraImage" alt="" loading="lazy" decoding="async" />
+        <video class="city-camera-video" data-ref="cameraVideo" muted autoplay playsinline loop preload="none" hidden></video>
+        <span class="city-camera-badge">
+          <span class="city-camera-live-dot" aria-hidden="true"></span>
+          <span data-ref="cameraBadge">Live</span>
+        </span>
+        <button
+          type="button"
+          class="city-camera-toggle"
+          data-ref="cameraToggle"
+          aria-pressed="false"
+        >
+          <span data-ref="cameraToggleLabel">Pause</span>
+        </button>
+        <button
+          type="button"
+          class="city-camera-next"
+          data-ref="cameraNext"
+          aria-pressed="false"
+          hidden
+        >
+          <span data-ref="cameraNextLabel">Next camera</span>
+        </button>
+      </div>
+      <figcaption class="city-camera-caption">
+        <span class="city-camera-name" data-ref="cameraName"></span>
+        <span class="city-camera-distance" data-ref="cameraDistance"></span>
+        <span class="city-camera-credit" data-ref="cameraCredit" hidden><a target="_blank" rel="noopener noreferrer" data-ref="cameraCreditLink" hidden></a></span>
+      </figcaption>
+    </figure>
+    <p class="city-camera-note" data-ref="cameraNote" hidden></p>
+  `;
+
+  /** Every element inside the panel, by the name the renderer uses it under. */
+  const CAMERA_REF_NAMES = [
+    'camera',
+    'cameraImage',
+    'cameraVideo',
+    'cameraBadge',
+    'cameraToggle',
+    'cameraToggleLabel',
+    'cameraNext',
+    'cameraNextLabel',
+    'cameraName',
+    'cameraDistance',
+    'cameraCredit',
+    'cameraCreditLink',
+    'cameraNote',
+  ];
+
   const CARD_TEMPLATE = `
     <div class="city-result-top">
       <div>
@@ -2721,33 +2797,7 @@
         <span data-ref="wind"></span>
       </div>
     </div>
-
-    <!-- Free live camera for this city. Filled in lazily by the camera
-         resolver; a city with no public camera keeps the panel hidden. -->
-    <figure class="city-camera" data-ref="camera" hidden>
-      <div class="city-camera-frame">
-        <img class="city-camera-image" data-ref="cameraImage" alt="" loading="lazy" decoding="async" />
-        <span class="city-camera-badge">
-          <span class="city-camera-live-dot" aria-hidden="true"></span>
-          <span data-ref="cameraBadge">Live</span>
-        </span>
-        <button
-          type="button"
-          class="city-camera-toggle"
-          data-ref="cameraToggle"
-          aria-pressed="false"
-        >
-          <span data-ref="cameraToggleLabel">Pause</span>
-        </button>
-      </div>
-      <figcaption class="city-camera-caption">
-        <span class="city-camera-name" data-ref="cameraName"></span>
-        <span class="city-camera-distance" data-ref="cameraDistance"></span>
-        <span class="city-camera-credit" data-ref="cameraCredit" hidden><a target="_blank" rel="noopener noreferrer" data-ref="cameraCreditLink" hidden></a></span>
-      </figcaption>
-    </figure>
-    <p class="city-camera-note" data-ref="cameraNote" hidden></p>
-
+${CAMERA_PANEL_HTML}
     <div class="city-result-footer">
       <span class="action-link">
         View Weather Details
@@ -2789,55 +2839,12 @@
         clockSeconds: card.querySelector('[data-ref="clockSeconds"]'),
         zoneAbbr: card.querySelector('[data-ref="zoneAbbr"]'),
         offsetDiff: card.querySelector('[data-ref="offsetDiff"]'),
-        camera: card.querySelector('[data-ref="camera"]'),
-        cameraImage: card.querySelector('[data-ref="cameraImage"]'),
-        cameraBadge: card.querySelector('[data-ref="cameraBadge"]'),
-        cameraToggle: card.querySelector('[data-ref="cameraToggle"]'),
-        cameraToggleLabel: card.querySelector('[data-ref="cameraToggleLabel"]'),
-        cameraName: card.querySelector('[data-ref="cameraName"]'),
-        cameraDistance: card.querySelector('[data-ref="cameraDistance"]'),
-        cameraCredit: card.querySelector('[data-ref="cameraCredit"]'),
-        cameraCreditLink: card.querySelector('[data-ref="cameraCreditLink"]'),
-        cameraNote: card.querySelector('[data-ref="cameraNote"]'),
       };
 
-      // Per-card camera bookkeeping. `cameraTimer` refreshes the snapshot at
-      // the source's own cadence; it only ever runs while the card is on screen
-      // with the panel switched on.
-      refs.cameraCity = city;
-      refs.cameraRecord = null;
-      refs.cameraTimer = null;
-      refs.cameraPaused = false;
-      refs.cameraFrameShownAt = 0;
-      refs.cameraVisible = false;
-      refs.cameraFailed = false;
-      refs.cameraRequest = null;
-
-      // The panel is a control surface inside a role="button" card, so its own
-      // clicks and key presses must not bubble up into "open this city".
-      if (refs.cameraToggle) {
-        refs.cameraToggle.addEventListener('click', (event) => {
-          event.stopPropagation();
-          event.preventDefault();
-          toggleCardCamera(refs);
-        });
-        // The card itself is a role="button" that opens the city on Enter/Space,
-        // so the pause control's own key presses have to stop there too.
-        refs.cameraToggle.addEventListener('keydown', (event) => {
-          event.stopPropagation();
-        });
-      }
-      if (refs.cameraImage) {
-        refs.cameraImage.addEventListener('error', () => {
-          refs.cameraFailed = true;
-          showCameraNote(refs, t('camera.offline', null, 'Camera unavailable'));
-        });
-        refs.cameraImage.addEventListener('load', () => {
-          refs.cameraFailed = false;
-          refs.cameraFrameShownAt = Date.now();
-          if (refs.cameraNote) refs.cameraNote.hidden = true;
-        });
-      }
+      // The camera panel is the same panel the dashboard and the comparison rows
+      // mount, so it is bound - and owned - by one function rather than by each
+      // view separately.
+      adoptCameraPanel(bindCameraPanel(card), card);
 
       // Register this card's clock with the shared ticker. The zone is filled in
       // by updateResultCard below; clockId lets us re-register (never duplicate)
@@ -2943,9 +2950,15 @@
   //    its registry requires.
   //  * **"No camera" is a real answer.** Most of the world has no free public
   //    camera, and the card says so in one line rather than faking a frame.
+  //  * **Everywhere a city is shown.** The panel is mounted by one function, so
+  //    the climate grid, each comparison slot and the selected city on the
+  //    dashboard all get the same live view - not just one section.
   //  * **Lazy.** The directory is rate-limited, so a card is only ever asked
   //    about once it is actually scrolled into view, and the answer (including
   //    "nothing here") is cached for the session.
+  //  * **Plays, or says it does not.** A camera that publishes a stream is
+  //    played in a `<video>`; one that publishes only stills is polled, and the
+  //    badge then says it is a still rather than claiming motion it does not have.
   //  * **Polite refresh.** Snapshot feeds are polled at the cadence the source
   //    itself publishes, and only while the card is on screen and unpaused.
   // ==========================================================================
@@ -2955,20 +2968,49 @@
   const CAMERA_REGISTRY_TTL = 6 * 60 * 60 * 1000;
   /** Gap between directory lookups, so a fast scroll cannot burst the budget. */
   const CAMERA_LOOKUP_SPACING_MS = 900;
+  /**
+   * How long the app stops asking after the directory throttles or fails us.
+   *
+   * The previous behaviour was to give up for the whole session, which turned a
+   * momentary 429 into "this city has no free public camera" everywhere for the
+   * rest of the visit. A cooldown is honest and self-healing: the city is asked
+   * again later, and until then the panel says the lookup is unavailable
+   * instead of claiming to know the answer.
+   */
+  const CAMERA_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 
   const cameraState = {
-    /** cityId -> { status, camera }. 'none' is cached like any other answer. */
+    /**
+     * cityId -> { status, cameras }. `status` is one of:
+     *   'found'   - the directory answered, `cameras` holds the ranked list;
+     *   'none'    - the directory answered, and there is genuinely nothing here;
+     *   'unknown' - we were not allowed to ask, so nobody knows yet.
+     * Only 'found' and 'none' are cached for the session: 'unknown' is a
+     * statement about the network, not about the city.
+     */
     records: new Map(),
     inflight: new Map(),
+    /** Every mounted panel, so one switch and one observer drive all of them. */
+    panels: new Map(),
+    panelSeq: 0,
+    /** The dashboard's single panel, kept across searches. */
+    glancePanel: null,
     cadenceByRegistry: null,
     cadenceFetchedAt: 0,
     cadenceRequest: null,
     remainingBudget: null,
-    budgetSpent: false,
+    /** Epoch ms before which the directory is not asked again; 0 = may ask. */
+    budgetSpentAt: 0,
+    retryTimer: null,
     nextLookupAt: 0,
     toggle: null,
     gridObserver: null,
   };
+
+  /** True while the app is deliberately not asking the directory. */
+  function cameraLookupBlocked() {
+    return Date.now() < cameraState.budgetSpentAt;
+  }
 
   function cameraEngine() {
     return window.WeatherScopeCameras && typeof window.WeatherScopeCameras.findCameras === 'function'
@@ -3038,6 +3080,222 @@
     return cameraState.cadenceRequest;
   }
 
+  // --- Mounting the panel anywhere a city is shown --------------------------
+
+  /**
+   * Bind the panel markup inside `root`.
+   *
+   * One binding for every view, so a city card in the climate grid, a comparison
+   * slot and the selected city on the dashboard can never drift apart.
+   */
+  function bindCameraPanel(root) {
+    const refs = {};
+    CAMERA_REF_NAMES.forEach((name) => {
+      refs[name] = root.querySelector(`[data-ref="${name}"]`);
+    });
+    return refs;
+  }
+
+  /**
+   * Take ownership of a panel: give it an identity, give it its controls, and
+   * register it so the single visibility observer and the single on/off switch
+   * reach every view at once.
+   */
+  function adoptCameraPanel(refs, host, options) {
+    const settings = options || {};
+    if (!refs || !refs.camera) return refs;
+
+    cameraState.panelSeq += 1;
+    refs.cameraPanelId = 'camera-panel-' + cameraState.panelSeq;
+    refs.cameraHost = host || (refs.camera.parentNode || null);
+    // Stop the panel's own controls from reaching whatever card encloses it: the
+    // grid card is a role="button" that opens the city.
+    if (refs.camera) {
+      refs.camera.dataset.cameraPanel = refs.cameraPanelId;
+      if (settings.onActivate) refs.camera.addEventListener('click', settings.onActivate);
+    }
+
+    refs.cameraCity = null;
+    refs.cameraRecord = null;
+    refs.cameraIndex = 0;
+    refs.cameraTimer = null;
+    refs.cameraPaused = false;
+    refs.cameraFrameShownAt = 0;
+    refs.cameraVisible = false;
+    refs.cameraFailed = false;
+    refs.cameraRequest = null;
+
+    if (refs.cameraToggle) {
+      refs.cameraToggle.addEventListener('click', (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        toggleCardCamera(refs);
+      });
+      // The enclosing card is a role="button" that opens the city on Enter/Space,
+      // so the control's own key presses have to stop there too.
+      refs.cameraToggle.addEventListener('keydown', (event) => {
+        event.stopPropagation();
+      });
+    }
+    if (refs.cameraNext) {
+      refs.cameraNext.addEventListener('click', (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        showNextCamera(refs);
+      });
+      refs.cameraNext.addEventListener('keydown', (event) => {
+        event.stopPropagation();
+      });
+    }
+    if (refs.cameraImage) {
+      refs.cameraImage.addEventListener('error', () => {
+        refs.cameraFailed = true;
+        showCameraNote(refs, t('camera.offline', null, 'Camera unavailable'));
+      });
+      refs.cameraImage.addEventListener('load', () => {
+        refs.cameraFailed = false;
+        refs.cameraFrameShownAt = Date.now();
+        if (refs.cameraNote) refs.cameraNote.hidden = true;
+      });
+    }
+    if (refs.cameraVideo) {
+      // A stream that cannot start is treated exactly like a broken snapshot:
+      // the panel says so instead of holding a black rectangle.
+      refs.cameraVideo.addEventListener('error', () => {
+        refs.cameraFailed = true;
+        showCameraNote(refs, t('camera.offline', null, 'Camera unavailable'));
+      });
+    }
+
+    cameraState.panels.set(refs.cameraPanelId, refs);
+    return refs;
+  }
+
+  /** Build and own a fresh panel inside `host`; used by the non-card views. */
+  function mountCameraPanel(host, options) {
+    if (!host) return null;
+    host.innerHTML = CAMERA_PANEL_HTML;
+    return adoptCameraPanel(bindCameraPanel(host), host, options);
+  }
+
+  /**
+   * Mount (or reuse) the selected city's panel on the dashboard.
+   *
+   * The panel is built once and then re-pointed at a new city, because the
+   * glance card itself is re-rendered on every search: rebuilding the panel each
+   * time would leave the old one registered and its stream still open.
+   */
+  function syncGlanceCamera(city) {
+    const slot = elements.glanceCameraSlot;
+    if (!slot) return null;
+    if (!city || city.latitude === undefined || city.longitude === undefined) {
+      releaseCameraPanel(cameraState.glancePanel);
+      cameraState.glancePanel = null;
+      slot.innerHTML = '';
+      return null;
+    }
+    if (!cameraState.glancePanel) {
+      cameraState.glancePanel = mountCameraPanel(slot);
+      if (cameraState.glancePanel) observeCityCards();
+    }
+    const refs = cameraState.glancePanel;
+    if (refs.cameraCity === city) return refs;
+    resetCameraCard(refs, city);
+    if (refs.cameraVisible && camerasEnabled()) requestCityCamera(refs);
+    return refs;
+  }
+
+  /**
+   * One panel per compared city, in the order the cities were picked.
+   *
+   * The grid is rebuilt only when the set of cities changes (the same signature
+   * guard the slot rows use), so re-sorting or a unit toggle does not restart
+   * every stream in the comparison.
+   */
+  function renderCompareCameras() {
+    const container = elements.compareCameras;
+    if (!container) return;
+    const locations = state.compareLocations || [];
+    const picked = locations.filter((slot) => slot && slot.city && slot.city.latitude !== undefined);
+
+    const signature = picked.map((slot) => cityIdOf(slot.city)).join('~');
+    if (container.dataset.signature !== signature) {
+      releaseCompareCameras();
+      container.dataset.signature = signature;
+      container.innerHTML = '';
+      picked.forEach((slot, index) => {
+        const cell = document.createElement('div');
+        cell.className = 'compare-camera-cell';
+        const heading = document.createElement('h3');
+        heading.className = 'compare-camera-city';
+        heading.textContent = slot.city.name;
+        const mount = document.createElement('div');
+        mount.className = 'compare-camera-mount';
+        cell.append(heading, mount);
+        container.appendChild(cell);
+        const refs = mountCameraPanel(mount);
+        if (!refs) return;
+        resetCameraCard(refs, slot.city);
+      });
+      if (picked.length) observeCityCards();
+      return;
+    }
+
+    // Same cities, new render: re-point the panels rather than rebuild them.
+    cameraState.panels.forEach((refs) => {
+      if (refs.cameraHost && refs.cameraHost.classList.contains('compare-camera-mount')) {
+        const city = picked.map((slot) => slot.city).find((candidate) => cityIdOf(candidate) === cityIdOf(refs.cameraCity));
+        if (city && city !== refs.cameraCity) resetCameraCard(refs, city);
+      }
+    });
+  }
+
+  /** Hand back every camera the comparison is holding open. */
+  function releaseCompareCameras() {
+    const container = elements.compareCameras;
+    if (!container) return;
+    Array.from(container.querySelectorAll('.compare-camera-mount')).forEach((mount) => {
+      const panel = mount.querySelector('[data-camera-panel]');
+      if (panel) {
+        const refs = cameraState.panels.get(panel.dataset.cameraPanel);
+        if (refs) releaseCameraPanel(refs);
+      }
+    });
+    container.dataset.signature = '';
+    container.innerHTML = '';
+  }
+
+  /** Drop a panel: stop its timer, release its media, forget it. */
+  function releaseCameraPanel(refs) {
+    if (!refs) return;
+    stopCameraPolling(refs);
+    releaseCameraMedia(refs);
+    if (refs.cameraPanelId) cameraState.panels.delete(refs.cameraPanelId);
+    if (refs.cameraRequest) {
+      // The request is still in flight; it is harmless, it simply has nothing
+      // left to paint, because `cameraCity` is cleared below.
+      refs.cameraRequest = null;
+    }
+    refs.cameraCity = null;
+  }
+
+  /** Let go of the network resources a panel is holding. */
+  function releaseCameraMedia(refs) {
+    if (!refs) return;
+    if (refs.cameraVideo) {
+      try { refs.cameraVideo.pause(); } catch (err) { /* not playing */ }
+      refs.cameraVideo.removeAttribute('src');
+      // A paused <video> with no source is what actually releases the
+      // connection; removing the attribute alone leaves the socket open.
+      if (typeof refs.cameraVideo.load === 'function') refs.cameraVideo.load();
+    }
+    if (refs.cameraImage) refs.cameraImage.removeAttribute('src');
+    // Nothing is on screen any more, so nothing may be reused: without this the
+    // next paint would decide the plain URL is current and hand the browser back
+    // the frame it had cached before the panel was released.
+    refs.cameraFrameShownAt = 0;
+  }
+
   // --- Resolving one city ---------------------------------------------------
 
   /**
@@ -3062,7 +3320,15 @@
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
     try {
       const res = await fetch(url, { signal: controller.signal, credentials: 'omit', cache: 'no-store' });
-      if (!res.ok) throw new Error(`Camera directory responded ${res.status}`);
+      if (!res.ok) {
+        const error = new Error(`Camera directory responded ${res.status}`);
+        error.status = res.status;
+        // 429 is the directory saying "you asked too often". It is a statement
+        // about our behaviour, not about the city, so it must not be cached as
+        // an answer - see `resolveCityCamera`.
+        error.throttled = res.status === 429;
+        throw error;
+      }
       if (headerReader) headerReader.headers = res.headers;
       return await res.json();
     } finally {
@@ -3092,7 +3358,7 @@
   }
 
   /**
-   * The camera for a city, or `null` when there is not one.
+   * The camera for a city, or a record saying there is not one.
    *
    * Cached per city for the session - including the "nothing here" answer - so
    * re-sorting or re-filtering the grid never re-asks the directory.
@@ -3104,19 +3370,19 @@
     if (cameraState.records.has(city.id)) return cameraState.records.get(city.id);
     if (cameraState.inflight.has(city.id)) return cameraState.inflight.get(city.id);
 
-    const cached = readCameraCache(city.id);
+    const cached = readCameraCache(cityIdOf(city));
     if (cached) {
       const record = normalizeCameraRecord(cached);
-      cameraState.records.set(city.id, record);
-      return record;
+      if (record.status !== 'unknown') {
+        cameraState.records.set(city.id, record);
+        return record;
+      }
     }
 
-    // Stop before the directory starts throttling rather than after.
-    if (cameraState.budgetSpent || engine.isBudgetExhausted(cameraState.remainingBudget)) {
-      const record = { status: 'none', camera: null };
-      cameraState.records.set(city.id, record);
-      cameraState.budgetSpent = true;
-      return record;
+    // Stop before the directory starts throttling rather than after - but only
+    // until the cooldown expires, and only as "we were not allowed to ask".
+    if (cameraLookupBlocked()) {
+      return unknownCameraRecord(city);
     }
 
     const request = (async () => {
@@ -3128,20 +3394,30 @@
 
       const cadence = await cameraCadence();
       const headerReader = makeHeaderReader();
+      let failure = null;
       const cameras = await engine.findCameras(city, {
         fetchJson: (url) => fetchCameraJson(url, headerReader),
         pollSecondsByRegistry: cadence,
         responseHeaders: headerReader,
         onBudget: (remaining) => { cameraState.remainingBudget = remaining; },
+        onFailure: (err) => { failure = err; },
       });
       if (engine.isBudgetExhausted(cameraState.remainingBudget)) {
         // The anonymous budget is spent for this visitor's IP. Every city from
         // here on is answered from that answer rather than asked about, so the
         // grid still renders and nothing is throttled.
-        cameraState.budgetSpent = true;
+        blockCameraLookups();
       }
 
-      const record = { status: cameras.length ? 'found' : 'none', camera: engine.pickCamera(cameras) };
+      if (failure) {
+        // Not cached: caching a throttle as "no camera here" would have the app
+        // claim, for the rest of the session, that a city it never managed to
+        // ask about has no public camera.
+        blockCameraLookups();
+        return unknownCameraRecord(city);
+      }
+
+      const record = { status: cameras.length ? 'found' : 'none', cameras: cameras || [] };
       cameraState.records.set(city.id, record);
       writeCameraCache(city.id, record);
       return record;
@@ -3155,14 +3431,56 @@
     }
   }
 
-  /** A cached record comes back from JSON; rebuild the shape we render from. */
-  function normalizeCameraRecord(raw) {
-    if (!raw || typeof raw !== 'object') return { status: 'none', camera: null };
-    if (raw.status !== 'found' || !raw.camera) return { status: 'none', camera: null };
-    return { status: 'found', camera: raw.camera };
+  /** A "we were not allowed to ask" answer, which is never cached. */
+  function unknownCameraRecord(city) {
+    const record = { status: 'unknown', cameras: [] };
+    if (city && city.id) cameraState.records.set(city.id, record);
+    return record;
   }
 
-  // --- Painting one card ----------------------------------------------------
+  /**
+   * Stop asking for a while, and make sure the pause ends by itself.
+   *
+   * One timer for the whole app: when the cooldown runs out the blocked answers
+   * are dropped and any visible panel asks again. Nothing is retried while it
+   * would just be throttled again.
+   */
+  function blockCameraLookups() {
+    cameraState.budgetSpentAt = Date.now() + CAMERA_RETRY_COOLDOWN_MS;
+    if (cameraState.retryTimer !== null) return;
+    cameraState.retryTimer = setTimeout(() => {
+      cameraState.retryTimer = null;
+      cameraState.budgetSpentAt = 0;
+      cameraState.remainingBudget = null;
+      cameraState.records.forEach((record, cityId) => {
+        if (record && record.status === 'unknown') cameraState.records.delete(cityId);
+      });
+      refreshCityCameras();
+    }, CAMERA_RETRY_COOLDOWN_MS);
+  }
+
+  /** Storage keys must be safe to build, so they are always a real city id. */
+  function cityIdOf(city) {
+    if (!city) return '';
+    if (typeof city.id === 'string' && city.id) return city.id;
+    if (typeof city.id === 'number') return String(city.id);
+    return [city.name, city.country, city.latitude, city.longitude]
+      .filter((part) => part !== undefined && part !== null && part !== '')
+      .join('_')
+      .replace(/[^A-Za-z0-9_-]/g, '');
+  }
+
+  /** A cached record comes back from JSON; rebuild the shape we render from. */
+  function normalizeCameraRecord(raw) {
+    if (!raw || typeof raw !== 'object') return { status: 'none', cameras: [] };
+    const cameras = Array.isArray(raw.cameras) ? raw.cameras : [];
+    // A record written by an older build carried a single camera.
+    if (!cameras.length && raw.camera && typeof raw.camera === 'object') cameras.push(raw.camera);
+    if (raw.status === 'unknown') return { status: 'unknown', cameras: [] };
+    return { status: raw.status === 'found' && cameras.length ? 'found' : 'none', cameras };
+  }
+
+  // --- Painting one panel ----------------------------------------------------
 
   function showCameraNote(refs, message) {
     if (!refs.cameraNote) return;
@@ -3176,7 +3494,16 @@
   }
 
   function cameraPanelElements(refs) {
-    return [refs.camera, refs.cameraImage, refs.cameraBadge, refs.cameraName, refs.cameraDistance, refs.cameraCredit];
+    return [
+      refs.camera,
+      refs.cameraImage,
+      refs.cameraVideo,
+      refs.cameraBadge,
+      refs.cameraNext,
+      refs.cameraName,
+      refs.cameraDistance,
+      refs.cameraCredit,
+    ];
   }
 
   function hideCameraPanel(refs) {
@@ -3188,13 +3515,14 @@
   function resetCameraCard(refs, city) {
     refs.cameraCity = city;
     refs.cameraRecord = null;
+    refs.cameraIndex = 0;
     refs.cameraPaused = false;
     refs.cameraFailed = false;
     refs.cameraFrameShownAt = 0;
     hideCameraPanel(refs);
     showCameraNote(refs, '');
 
-    if (!cameraEngine()) return;
+    if (!cameraEngine() || !city) return;
     const record = cameraState.records.get(city.id);
     if (record) {
       paintCameraCard(refs, record);
@@ -3203,12 +3531,24 @@
     if (camerasEnabled() && refs.cameraVisible) requestCityCamera(refs);
   }
 
+  /** The camera this panel is currently showing. */
+  function activeCamera(refs) {
+    const record = refs && refs.cameraRecord;
+    if (!record || record.status !== 'found' || !Array.isArray(record.cameras)) return null;
+    const index = Number.isInteger(refs.cameraIndex) ? refs.cameraIndex : 0;
+    return record.cameras[index] || null;
+  }
+
   function paintCameraCard(refs, record) {
     refs.cameraRecord = record;
-    const camera = record && record.camera;
+    const camera = activeCamera(refs);
 
     if (!camera) {
       hideCameraPanel(refs);
+      if (record && record.status === 'unknown') {
+        showCameraNote(refs, t('camera.throttled', null, 'Camera lookup unavailable right now'));
+        return;
+      }
       showCameraNote(refs, t('camera.none', null, 'No free public camera for this city'));
       return;
     }
@@ -3241,33 +3581,201 @@
       }
     }
 
-    if (refs.cameraImage) {
-      // The frame is a snapshot, so it is described as a still of the named
-      // place rather than as the card's own subject.
-      refs.cameraImage.alt = camera.name
-        ? t('camera.alt', { place: camera.name }, `Live camera view: ${camera.name}`)
-        : t('camera.altGeneric', null, 'Live camera view');
-      refs.cameraImage.src = cameraFrameUrl(camera, refs);
-    }
+    refs.cameraFailed = false;
+    showCameraMedia(refs, camera);
 
     if (refs.cameraBadge) {
       refs.cameraBadge.hidden = false;
-      refs.cameraBadge.textContent = t('camera.live', null, 'Live');
+      refs.cameraBadge.textContent = cameraBadgeLabel(camera);
+    }
+    if (refs.cameraNext) {
+      const total = record && Array.isArray(record.cameras) ? record.cameras.length : 0;
+      refs.cameraNext.hidden = total < 2;
+      if (refs.cameraNextLabel) {
+        refs.cameraNextLabel.textContent = t('camera.next', { index: (refs.cameraIndex || 0) + 1, total },
+          `Next camera (${(refs.cameraIndex || 0) + 1}/${total})`);
+      }
     }
     setCameraPausedState(refs, refs.cameraPaused);
     syncCameraPolling(refs);
   }
 
   /**
-   * Cache-bust the snapshot only once the source's own cadence has elapsed, so
-   * a repaint (a sort, a language switch) reuses the frame already on screen
-   * instead of pulling a fresh one.
+   * "Live" is a claim about motion, so it is only made where there is motion.
+   * A stream is playing video; a polled still is a still, and the badge says so.
    */
-  function cameraFrameUrl(camera, refs) {
-    const engine = cameraEngine();
-    if (!engine) return camera.imageUrl;
-    return engine.frameUrl(camera, Date.now(), { frameBase: (refs && refs.cameraFrameShownAt) || 0 });
+  function cameraBadgeLabel(camera) {
+    return isPlayableStream(camera)
+      ? t('camera.live', null, 'Live')
+      : t('camera.still', null, 'Live still');
   }
+
+  /** True when this camera should be *played* rather than polled. */
+  function isPlayableStream(camera) {
+    if (!isStreamFeed(camera)) return false;
+    if (camera.kind === 'mjpeg') return true;
+    const type = camera.kind === 'hls'
+      ? 'application/vnd.apple.mpegurl'
+      : (camera.kind === 'file' ? 'video/mp4' : '');
+    if (!type || typeof document === 'undefined' || typeof document.createElement !== 'function') return false;
+    const video = document.createElement('video');
+    if (typeof video.canPlayType !== 'function') return false;
+    try {
+      return video.canPlayType(type) !== '';
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /**
+   * Put the camera on screen the right way for what it publishes.
+   *
+   * An MJPEG stream is *video* even though it is delivered as a stream of JPEGs,
+   * so it plays in an `<img>` and the browser keeps refreshing it - that is why
+   * the panel moves for those cameras. HLS and file streams play in a `<video>`.
+   * Everything else is a still, and is polled.
+   */
+  function showCameraMedia(refs, camera) {
+    const playable = isPlayableStream(camera);
+    const isVideo = playable && camera.kind !== 'mjpeg';
+
+    if (refs.cameraImage) {
+      refs.cameraImage.hidden = isVideo;
+      // The frame is a still of the named place, so it is described as such
+      // rather than as the card's own subject.
+      refs.cameraImage.alt = camera.name
+        ? t('camera.alt', { place: camera.name }, `Live camera view: ${camera.name}`)
+        : t('camera.altGeneric', null, 'Live camera view');
+      if (!isVideo && typeof camera.imageUrl === 'string' && camera.imageUrl) {
+        applyCameraFrame(refs, camera);
+      } else if (isVideo) {
+        refs.cameraImage.removeAttribute('src');
+      }
+    }
+
+    if (refs.cameraVideo) {
+      if (!isVideo) {
+        releaseCameraVideo(refs);
+        refs.cameraVideo.hidden = true;
+      } else {
+        refs.cameraVideo.hidden = false;
+        startCameraVideo(refs, camera);
+      }
+    }
+  }
+
+  function releaseCameraVideo(refs) {
+    if (!refs.cameraVideo) return;
+    try { refs.cameraVideo.pause(); } catch (err) { /* nothing was playing */ }
+    refs.cameraVideo.removeAttribute('src');
+    // A paused <video> with no source is what actually closes the connection;
+    // clearing the attribute alone leaves the socket open.
+    if (typeof refs.cameraVideo.load === 'function') refs.cameraVideo.load();
+  }
+
+  /**
+   * Attach a stream and get it playing.
+   *
+   * Autoplay is only permitted for muted video, which is why the element is
+   * `muted autoplay playsinline` in the markup. A browser that refuses anyway
+   * (a low-power mode, a policy) leaves the feed paused, so the fallback has to
+   * be chosen here rather than left to the visitor: a source that also publishes
+   * a still falls back to that still, and one that does not is reported as
+   * unavailable rather than left as a black rectangle.
+   */
+  function startCameraVideo(refs, camera) {
+    const video = refs.cameraVideo;
+    if (!video || !camera || typeof camera.streamUrl !== 'string' || !camera.streamUrl) return;
+    if (video.dataset.cameraSrc === camera.streamUrl) {
+      resumeCameraVideo(video);
+      return;
+    }
+    video.dataset.cameraSrc = camera.streamUrl;
+    video.src = camera.streamUrl;
+    video.muted = true;
+    try {
+      const started = video.play();
+      if (started && typeof started.catch === 'function') {
+        started.catch(() => {
+          if (typeof camera.imageUrl === 'string' && camera.imageUrl) {
+            video.hidden = true;
+            if (refs.cameraImage) {
+              refs.cameraImage.hidden = false;
+              applyCameraFrame(refs, camera, { fresh: true });
+            }
+            if (refs.cameraBadge) refs.cameraBadge.textContent = cameraBadgeLabel(camera);
+            return;
+          }
+          refs.cameraFailed = true;
+          showCameraNote(refs, t('camera.offline', null, 'Camera unavailable'));
+        });
+      }
+    } catch (err) {
+      /* treated as "will not play": the note below is the honest outcome */
+      refs.cameraFailed = true;
+      showCameraNote(refs, t('camera.offline', null, 'Camera unavailable'));
+    }
+  }
+
+  function resumeCameraVideo(video) {
+    if (!video) return;
+    try {
+      const started = video.play();
+      if (started && typeof started.catch === 'function') started.catch(() => {});
+    } catch (err) {
+      /* nothing to resume */
+    }
+  }
+
+  /**
+   * Show the next still, and decide whether it needs a cache-buster.
+   *
+   * `cameraFrameShownAt` is *when the frame on screen was shown*, so it must be
+   * read before it is written. Writing it first - which is what this used to do
+   * - makes the elapsed time zero, so no cache-buster was ever added and the
+   * browser was handed back the identical URL it already had cached. That is
+   * what left the panel looking frozen while the app believed it was refreshing.
+   *
+   * `fresh` is the poller's answer to "the cadence has already elapsed, so this
+   * is a new frame": it skips the elapsed-time question altogether, because
+   * asking it again with the clock as the base is exactly the frozen-frame bug.
+   * Whether a URL may be busted at all - a stream may not - is the engine's
+   * rule, not this function's, so there is one answer rather than two.
+   *
+   * A re-render is not a refresh: sorting the grid, switching language or
+   * re-running the panels leaves the frame that is already on screen alone for as
+   * long as the source's cadence allows, which is what `frameIsCurrent` decides.
+   */
+  function applyCameraFrame(refs, camera, options) {
+    const engine = cameraEngine();
+    if (!engine || !refs.cameraImage || !camera) return '';
+    const settings = options || {};
+    const now = Date.now();
+    const shownAt = refs.cameraFrameShownAt || 0;
+    const showing = refs.cameraImage.getAttribute('src') || '';
+    // The frame on screen is this camera's if the URL it was asked for is still
+    // the one being served - the cache-buster is part of that URL, not noise.
+    const onScreen = Boolean(showing) && showing.indexOf(camera.imageUrl) === 0;
+
+    if (!settings.fresh && onScreen
+      && typeof engine.frameIsCurrent === 'function'
+      && engine.frameIsCurrent(camera, now, { frameBase: shownAt })) {
+      return showing;
+    }
+
+    const url = engine.nextFrameUrl(camera, now);
+    // Written after the URL is computed, never before.
+    refs.cameraFrameShownAt = now;
+    if (url && url !== showing) refs.cameraImage.src = url;
+    return url;
+  }
+
+  /** True when the camera publishes video rather than a still. */
+  function isStreamFeed(camera) {
+    const engine = cameraEngine();
+    return Boolean(engine && typeof engine.isStream === 'function' && engine.isStream(camera));
+  }
+
 
   function setCameraPausedState(refs, paused) {
     refs.cameraPaused = paused;
@@ -3283,30 +3791,52 @@
   }
 
   function toggleCardCamera(refs) {
-    const record = refs.cameraRecord;
-    if (!record || !record.camera) return;
+    const camera = activeCamera(refs);
+    if (!camera) return;
     const paused = !refs.cameraPaused;
     setCameraPausedState(refs, paused);
     if (paused) {
       stopCameraPolling(refs);
-      // Free the image as well as the timer, so a paused card costs nothing.
-      if (refs.cameraImage) refs.cameraImage.removeAttribute('src');
+      // Free the media as well as the timer, so a paused card costs nothing.
+      releaseCameraMedia(refs);
       if (refs.cameraBadge) refs.cameraBadge.hidden = true;
       return;
     }
-    if (refs.cameraImage) {
-      // Resuming clears the failure flag too: the frame that failed may well be
-      // serving again by now, and leaving the flag set would stop the polling
-      // from ever restarting.
-      refs.cameraFailed = false;
-      refs.cameraFrameShownAt = Date.now();
-      refs.cameraImage.src = record.camera.imageUrl;
-    }
+    // Resuming clears the failure flag too: the feed that failed may well be
+    // serving again by now, and leaving the flag set would stop the polling
+    // from ever restarting.
+    refs.cameraFailed = false;
+    showCameraMedia(refs, camera);
     if (refs.cameraBadge) refs.cameraBadge.hidden = false;
     syncCameraPolling(refs);
   }
 
+  /**
+   * Cycle to the next free camera the directory knows about for this city.
+   *
+   * The lookup already returns a ranked list of everything in range, so this
+   * surfaces the ones the app was holding back rather than asking again.
+   */
+  function showNextCamera(refs) {
+    const record = refs.cameraRecord;
+    if (!record || record.status !== 'found' || !Array.isArray(record.cameras) || record.cameras.length < 2) return;
+    const next = ((refs.cameraIndex || 0) + 1) % record.cameras.length;
+    refs.cameraIndex = next;
+    refs.cameraPaused = false;
+    refs.cameraFailed = false;
+    refs.cameraFrameShownAt = 0;
+    releaseCameraMedia(refs);
+    if (refs.cameraVideo) delete refs.cameraVideo.dataset.cameraSrc;
+    paintCameraCard(refs, record);
+  }
+
   // --- Polling --------------------------------------------------------------
+
+  /** How long this camera's source wants to be left alone between frames. */
+  function cameraCadenceMs(camera) {
+    if (!camera) return 60 * 1000;
+    return Math.max(15, camera.pollSeconds || 60) * 1000;
+  }
 
   function stopCameraPolling(refs) {
     if (refs.cameraTimer !== null) {
@@ -3316,8 +3846,9 @@
   }
 
   function syncCameraPolling(refs) {
+    const camera = activeCamera(refs);
     const shouldRun = Boolean(
-      refs.cameraRecord && refs.cameraRecord.camera &&
+      camera &&
       refs.cameraVisible &&
       !refs.cameraPaused &&
       !refs.cameraFailed &&
@@ -3329,12 +3860,22 @@
     }
     if (refs.cameraTimer !== null) return;
 
-    const cadenceMs = Math.max(15, (refs.cameraRecord.camera.pollSeconds || 60)) * 1000;
+    // A stream is already running: the browser is holding it open, and a timer
+    // that "refreshes" it would only tear the connection down and build it again.
+    if (isStreamFeed(camera)) {
+      const video = refs.cameraVideo;
+      if (video && !video.hidden && video.paused) resumeCameraVideo(video);
+      return;
+    }
+
+    const cadenceMs = cameraCadenceMs(camera);
     refs.cameraTimer = setTimeout(() => {
       refs.cameraTimer = null;
-      if (!refs.cameraRecord || !refs.cameraRecord.camera) return;
-      refs.cameraFrameShownAt = Date.now();
-      if (refs.cameraImage) refs.cameraImage.src = cameraFrameUrl(refs.cameraRecord.camera, refs);
+      const next = activeCamera(refs);
+      if (!next) return;
+      // The cadence has elapsed by definition here, so this is a genuinely new
+      // frame and is asked for unconditionally.
+      applyCameraFrame(refs, next, { fresh: true });
       syncCameraPolling(refs);
     }, cadenceMs);
   }
@@ -3362,60 +3903,89 @@
   }
 
   /**
-   * Watch the grid and only look up a city once its card is actually on screen.
-   * A climate filter can match 70+ cities; this is what keeps that from turning
-   * into 70 simultaneous directory requests.
+   * Watch every mounted panel and only look up a city once it is actually on
+   * screen. A climate filter can match 70+ cities; this is what keeps that from
+   * turning into 70 simultaneous directory requests - and it now covers the
+   * comparison slots and the selected city too, because it watches the panels
+   * rather than one grid.
    */
   function observeCityCards() {
     const engine = cameraEngine();
-    const grid = elements.climateResultsGrid;
-    if (!engine || !grid) return;
+    if (!engine) return;
+
+    if (cameraState.gridObserver) cameraState.gridObserver.disconnect();
+    cameraState.gridObserver = null;
 
     if (typeof IntersectionObserver !== 'function') {
-      // Without an observer every card is fair game, but only once the section
-      // is actually being looked at.
-      grid.querySelectorAll('.city-result-card').forEach((card) => {
-        const refs = state.resultCards.get(card.dataset.cityId);
-        if (refs) setCardCameraVisible(refs, true);
+      // Without an observer every panel is fair game, but only once the section
+      // it sits in is actually being looked at.
+      cameraState.panels.forEach((refs) => {
+        if (isCameraPanelInView(refs)) setCardCameraVisible(refs, true);
       });
       return;
     }
 
-    if (cameraState.gridObserver) cameraState.gridObserver.disconnect();
-
     cameraState.gridObserver = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
-        if (!entry.isIntersecting) return;
-        const refs = state.resultCards.get(entry.target.dataset.cityId);
-        if (!refs) return;
-        setCardCameraVisible(refs, true);
+        const refs = cameraState.panels.get(entry.target.dataset.cameraPanel);
+        if (refs) setCardCameraVisible(refs, entry.isIntersecting);
       });
     }, { rootMargin: '200px 0px' });
 
-    grid.querySelectorAll('.city-result-card').forEach((card) => {
-      cameraState.gridObserver.observe(card);
+    cameraState.panels.forEach((refs) => {
+      if (refs.camera) cameraState.gridObserver.observe(refs.camera);
     });
+  }
+
+  /** Fallback visibility check for browsers without IntersectionObserver. */
+  function isCameraPanelInView(refs) {
+    const node = refs && refs.camera;
+    if (!node || typeof node.getBoundingClientRect !== 'function') return false;
+    const rect = node.getBoundingClientRect();
+    const viewport = window.innerHeight || document.documentElement.clientHeight || 0;
+    if (!viewport) return false;
+    return rect.bottom > -200 && rect.top < viewport + 200;
   }
 
   function setCardCameraVisible(refs, visible) {
     refs.cameraVisible = visible;
     if (!visible) {
+      // Off screen: stop the timer and hand back the connection. Keeping an
+      // MJPEG stream open for a card nobody can see is the fastest way to make
+      // the browser refuse to open the ones that are.
       stopCameraPolling(refs);
+      releaseCameraMedia(refs);
       return;
     }
     const city = refs.cameraCity;
-    if (city && !cameraState.records.has(city.id) && camerasEnabled()) requestCityCamera(refs);
+    if (!city) return;
+    const record = cameraState.records.get(city.id);
+    if (!record && camerasEnabled()) {
+      requestCityCamera(refs);
+    } else if (record && !refs.cameraPaused) {
+      showCameraMedia(refs, activeCamera(refs));
+      if (refs.cameraBadge) refs.cameraBadge.hidden = false;
+    }
     syncCameraPolling(refs);
   }
 
-  /** Re-run the panels: after a language switch, a sort, or the on/off toggle. */
+  /**
+   * Re-run every mounted panel: after a language switch, a sort, the on/off
+   * toggle, or the cooldown expiring.
+   */
   function refreshCityCameras() {
-    state.resultCards.forEach((refs) => {
+    cameraState.panels.forEach((refs) => {
       const city = refs.cameraCity;
       if (!city) return;
       hideCameraPanel(refs);
       showCameraNote(refs, '');
-      if (!camerasEnabled()) return;
+      if (!camerasEnabled()) {
+        // The switch is off: hand the connections back rather than leaving a
+        // hidden panel holding an MJPEG stream open for the rest of the visit.
+        releaseCameraMedia(refs);
+        showCameraNote(refs, t('camera.off', null, 'Live cameras are off'));
+        return;
+      }
       const record = cameraState.records.get(city.id);
       if (record) {
         paintCameraCard(refs, record);
@@ -4030,6 +4600,7 @@
     if (!engine) return;
 
     renderCompareSlots();
+    renderCompareCameras();
 
     const comparable = engine.canCompare(state.compareLocations);
     elements.compareRunBtn.disabled = !comparable;
