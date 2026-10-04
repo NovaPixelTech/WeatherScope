@@ -73,8 +73,8 @@
   const COUNTRY_LANGS = {
     // Greek
     GR: 'el', CY: 'el',
-    // German (or a national language next to it)
-    DE: 'de', AT: 'de', CH: 'de', LI: 'de', LU: 'de',
+    // German-speaking countries and regions
+    DE: 'de', AT: 'de', CH: 'de', LI: 'de', LU: 'de', BE: 'de',
   };
 
   /** Timezone -> language, used only when both IP and browser locale fail. */
@@ -1750,6 +1750,13 @@
         return { country: data && data.country ? data.country : null, ip: data.ip, city: data.city };
       },
     },
+    {
+      url: 'https://ipapi.co/json/',
+      parse: (body) => {
+        const data = JSON.parse(body);
+        return { country: data && data.country_code, ip: data && data.ip, city: data && data.city };
+      },
+    },
   ];
 
   function validIp(value) {
@@ -1852,14 +1859,14 @@
       return { lang, ip: info.ip, city: info.city, country: info.country };
     }));
 
-    // Prefer a complete location (IP + city) when available; otherwise retain
-    // the best country/IP result rather than returning an empty location.
+    // Prefer a complete location (IP + country + city). In particular, do not
+    // let a fast country-only provider win while a richer provider is running.
     const complete = attempts.map((attempt) => attempt.then((info) => {
-      if (!info.ip || !info.city) throw new Error('incomplete geo result');
+      if (!info.ip || !info.city || !info.country) throw new Error('incomplete geo result');
       return info;
     }));
     if (typeof Promise.any === 'function') {
-      return Promise.any(complete).catch(() => Promise.any(attempts));
+      return Promise.any(complete);
     }
 
     // Promise.any is missing on older Safari / Firefox / Edge: emulate it, but
@@ -1869,11 +1876,7 @@
         const hit = results.find((result) => result.status === 'fulfilled');
         if (!hit) throw new Error('geo unavailable');
         return hit.value;
-      }).catch(() => Promise.allSettled(attempts).then((results) => {
-        const hit = results.find((result) => result.status === 'fulfilled');
-        if (!hit) throw new Error('geo unavailable');
-        return hit.value;
-      }));
+      });
     }
     return Promise.reject(new Error('geo unavailable'));
   }
