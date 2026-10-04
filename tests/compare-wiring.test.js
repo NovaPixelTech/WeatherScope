@@ -94,17 +94,17 @@ test('the comparison surface ships all of its regions', () => {
   ].forEach((id) => assert.ok(htmlIds.has(id), `#${id} is missing from index.html`));
 });
 
-test('Compare Locations is a third primary tab, in the same tablist', () => {
+test('Compare Locations remains in the primary tablist beside the other modes', () => {
   assert.ok(htmlIds.has('tab-mode-compare'), 'the compare tab is missing');
 
   const tabs = [...html.matchAll(/id="(tab-mode-[a-z]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(tabs, ['tab-mode-city', 'tab-mode-compare', 'tab-mode-climate']);
+  assert.deepEqual(tabs, ['tab-mode-city', 'tab-mode-compare', 'tab-mode-climate', 'tab-mode-cameras']);
 });
 
 test('every tab is a real ARIA tab wired to the shared panel', () => {
   const tabTags = [...html.matchAll(/<button[^>]*id="tab-mode-[a-z]+"[^>]*>/g)].map((m) => m[0]);
 
-  assert.equal(tabTags.length, 3);
+  assert.equal(tabTags.length, 4);
   tabTags.forEach((tag) => {
     assert.match(tag, /role="tab"/);
     assert.match(tag, /aria-selected="(true|false)"/);

@@ -418,3 +418,34 @@ test('the advice tile overrides come after the base rule, so they take effect', 
   assert.ok(narrow > base,
     'the 640px tile overrides are declared before .assistant-tile, so the base rule wins the cascade and the tighter type never applies');
 });
+
+test('the Live Cameras mode exposes the catalogue, selected-city wall and forecast handoff', () => {
+  ['tab-mode-cameras', 'camera-browser-section', 'camera-city-filter', 'camera-catalogue-groups',
+    'camera-city-card', 'camera-wall', 'camera-city-climate-body', 'camera-open-forecast-btn'].forEach((id) => {
+    assert.ok(html.includes(`id="${id}"`), `#${id} is missing`);
+  });
+  assert.match(html, /id="camera-browser-section"[^>]*class="[^"]*hidden/,
+    'the camera surface starts hidden');
+  assert.match(appSource, /engine\.catalogRegions\(list\)/,
+    'camera discovery reuses the registry response already fetched for cadences');
+  assert.match(appSource, /engine\.findRegionCameras\(entry\.query/,
+    'a catalogued city is resolved by the directory rather than guessed from a bounding box');
+  assert.match(appSource, /engine\.imageSource\(camera\)/,
+    'the wall uses the directory frame endpoint');
+  assert.match(appSource, /function openCameraCityForecast\(\)[\s\S]{0,700}setMode\('city'\)[\s\S]{0,100}loadCityWeather\(city\)/,
+    'the wall can hand off to the normal full city forecast');
+});
+
+test('the camera wall has responsive tiles, a visible keyboard focus, and hidden-state protection', () => {
+  assert.match(css, /\.camera-wall\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill/);
+  assert.match(css, /\.camera-city-tile:focus-visible/);
+  assert.match(css, /\.camera-city-card\[hidden\][\s\S]{0,100}display:\s*none\s*!important/);
+  assert.match(css, /@media \(max-width: 720px\)[\s\S]*?\.camera-city-head/);
+});
+
+test('the climate results and back bar are owned by Climate Filter mode', () => {
+  assert.match(appSource, /climateResultsSection\.classList\.toggle\('hidden',\s*mode !== 'climate'\)/);
+  assert.match(appSource, /backToResultsBar\.classList\.toggle\('hidden',\s*mode !== 'climate'\)/);
+  assert.match(appSource, /state\.matchingCities\.length > 0 && state\.searchMode === 'climate'/,
+    'a city load cannot revive the climate back bar in City Search or Compare');
+});

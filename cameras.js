@@ -46,6 +46,42 @@
   const DIRECTORY_ENDPOINT = 'https://datumfeed.com/api/cameras';
 
   /**
+   * The directory's coverage index.
+   *
+   * `GET /api/registries` answers with every registry *and the exact city names
+   * that registry covers*, without downloading a single camera. That makes it
+   * the discovery half of the API: one request turns "we have no idea where the
+   * cameras are" into a list of places worth asking about, which is what the
+   * camera browser is built from. It is the same response the app already reads
+   * for refresh cadences, so the catalogue costs no extra request.
+   */
+  const REGISTRIES_ENDPOINT = 'https://datumfeed.com/api/registries';
+
+  /**
+   * The directory's frame endpoint, passed through unmodified from the source.
+   *
+   * This is the single most useful thing the API publishes and the reason a
+   * wall of cameras is worth building at all:
+   *
+   *  * **CORS is solved on every camera.** Most sources do not send
+   *    `Access-Control-Allow-Origin`, which makes their pixels unreadable from a
+   *    browser no matter what the app does. The endpoint does.
+   *  * **The source's own cadence is applied server-side.** Frames are cached
+   *    per camera for `registry.minPollIntervalS` and served with a matching
+   *    `Cache-Control: max-age`, so a grid of live frames costs the sources
+   *    nothing extra and the browser refreshes them on its own. No timer, no
+   *    polling loop, no rate-limit arithmetic in the app.
+   *  * **A dead source degrades instead of erroring**: if the upstream is down
+   *    but an older frame is cached, the older frame is served.
+   *
+   * `proxyOk` is a *legal* field, not a technical one: a registry that does not
+   * permit server-side proxying answers 403 here, so `frameUrl` is asked per
+   * registry rather than assumed. Today all seven allow it, and that is checked
+   * rather than trusted.
+   */
+  const FRAME_ENDPOINT = 'https://datumfeed.com/api/cameras';
+
+  /**
    * Half-width of the search box around a city, in degrees (~55km of latitude).
    *
    * Deliberately a whole neighbourhood rather than a single block: public
@@ -67,6 +103,27 @@
 
   /** How many candidates to pull before ranking them by distance. */
   const CANDIDATE_LIMIT = 12;
+
+  /**
+   * How many cameras a wall shows at once.
+   *
+   * A wall is a picture, not a directory: past a dozen the tiles stop being
+   * countable and the frames start costing the browser more than the answer is
+   * worth.
+   */
+  const REGION_CANDIDATE_LIMIT = 12;
+
+  /**
+   * How many the `?city=` request actually asks for, which is more than the wall
+   * shows.
+   *
+   * `verificationStatus: 'contradicted'` cameras are dropped *after* the page is
+   * read, so asking for exactly as many as are displayed hands back a half-empty
+   * wall on any registry where a decent share are flagged - Austin returns 8 of
+   * 12 asked for. Over-fetching costs nothing: it is the same single request,
+   * far under the directory's 500-per-page ceiling.
+   */
+  const REGION_FETCH_LIMIT = 30;
 
   /**
    * Fallback refresh cadence when a registry does not publish one. Snapshot
@@ -180,6 +237,7 @@
       source: text(registry.name),
       attribution: text(registry.attribution),
       attributionUrl: safeUrl(registry.licenseUrl),
+      proxyOk: registry.proxyOk === true ? true : (registry.proxyOk === false ? false : null),
       trustScore: numberOrNull(stats.trustScore),
     };
   }
@@ -406,6 +464,214 @@
   }
 
   // ==========================================================================
+  // Coverage discovery
+  // ==========================================================================
+  /**
+   * Words the directory itself uses for a covered place, and which the app has
+   * no other name for.
+   *
+   * The registry index names its cities as slugs (`bay area`), and a slug is not
+   * something to hand a visitor. Mapping only the ones the directory chose *not*
+   * to spell out keeps the rule simple: anything not listed here is simply a
+   * lower-cased slug turned back into title case, which is exactly right for
+   * `san francisco`, `toronto` and `washington`.
+   */
+  const REGION_TITLES = {
+    'bay area': 'Bay Area',
+    austin: 'Austin',
+    california: 'California',
+    london: 'London',
+    ontario: 'Ontario',
+    ottawa: 'Ottawa',
+    toronto: 'Toronto',
+    washington: 'Washington',
+  };
+
+  /** Two-letter country code -> the flag the browser can render without a request. */
+  const COUNTRY_FLAGS = {
+    CA: '\u{1F1E8}\u{1F1E6}',
+    GB: '\u{1F1EC}\u{1F1E7}',
+    US: '\u{1F1FA}\u{1F1F8}',
+  };
+
+  /**
+   * The directory's slug for a place, as `?city=` wants it.
+   *
+   * Matching on the directory's side is case-, space- and punctuation-insensitive,
+   * so slugging to lowercase-with-hyphens is a faithful round trip and never
+   * guesses: a name it does not recognise comes back as a 400 that names the
+   * cities it does cover.
+   */
+  function regionQuery(slug) {
+    const raw = text(slug).toLowerCase();
+    if (!raw) return '';
+    return raw.replace(/[\s_]+/g, '-').replace(/[^a-z0-9-]/g, '');
+  }
+
+  /** A place's slug as something a visitor can read. */
+  function regionTitle(slug) {
+    const query = regionQuery(slug);
+    if (!query) return '';
+    return REGION_TITLES[query] || query
+      .split('-')
+      .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
+      .join(' ');
+  }
+
+  /**
+   * The catalogue of every city the directory covers, one entry per city.
+   *
+   * Built from `GET /api/registries`, so it is the whole world of free public
+   * cameras in one request and costs nothing per city. A city is listed under
+   * the registry that publishes it, which is also the licence whose attribution
+   * has to travel with any frame from it - so the two are kept together rather
+   * than looked up later.
+   *
+   * `count` is deliberately *absent*. The index publishes a camera count per
+   * registry, not per city, so showing a registry's total on one of its cities
+   * would be a number about somewhere else. The exact count is asked for when a
+   * city is actually opened.
+   */
+  function catalogRegions(registriesBody) {
+    if (!Array.isArray(registriesBody)) return [];
+    const catalog = [];
+    const seen = new Set();
+
+    registriesBody.forEach((registry) => {
+      if (!registry || typeof registry !== 'object') return;
+      const registrySlug = text(registry.slug);
+      const regionSlug = regionQuery(registry.city);
+      if (!registrySlug || !regionSlug) return;
+
+      const attribution = text(registry.attribution);
+      const attributionUrl = safeUrl(registry.licenseUrl);
+      const cities = Array.isArray(registry.cities) ? registry.cities : [];
+
+      cities.forEach((citySlug) => {
+        const query = regionQuery(citySlug);
+        // One entry per physical place. Ontario 511 and the City of Toronto both
+        // publish the Gardiner/DVP sites, so without this the same city appears
+        // twice under two licences.
+        if (!query || seen.has(query)) return;
+        seen.add(query);
+
+        catalog.push({
+          query,
+          name: regionTitle(citySlug),
+          registry: registrySlug,
+          registryName: text(registry.name) || registrySlug,
+          country: text(registry.country).toUpperCase(),
+          flag: COUNTRY_FLAGS[text(registry.country).toUpperCase()] || '',
+          attribution,
+          attributionUrl,
+          pollSeconds: positiveInt(registry.minPollIntervalS) || DEFAULT_POLL_SECONDS,
+        });
+      });
+    });
+
+    return catalog;
+  }
+
+  /**
+   * The cities that belong to one registry, for rendering them as a group.
+   *
+   * Grouping is the honest shape here: a city on its own says nothing about why
+   * it has cameras and a visitor with a European city in mind should be able to
+   * see, before clicking anything, that coverage is regional.
+   */
+  function groupRegionsByRegistry(catalog) {
+    const groups = [];
+    const bySlug = new Map();
+    (Array.isArray(catalog) ? catalog : []).forEach((entry) => {
+      if (!entry || !entry.registry) return;
+      let group = bySlug.get(entry.registry);
+      if (!group) {
+        group = {
+          registry: entry.registry,
+          registryName: entry.registryName,
+          country: entry.country,
+          flag: entry.flag,
+          attribution: entry.attribution,
+          attributionUrl: entry.attributionUrl,
+          cities: [],
+        };
+        bySlug.set(entry.registry, group);
+        groups.push(group);
+      }
+      group.cities.push(entry);
+    });
+    return groups;
+  }
+
+  /**
+   * Case- and accent-insensitive filter over the catalogue.
+   *
+   * Deliberately not diacritic-stripping through `normalize()`: the catalogue is
+   * a list of places, and a visitor typing "sao" should find "Sacramento"
+   * whether or not their keyboard produced an accent. Falls back to `indexOf`
+   * so a substring match still works on a browser without `normalize`.
+   */
+  function filterRegions(catalog, query) {
+    const list = Array.isArray(catalog) ? catalog : [];
+    const raw = text(query);
+    if (!raw) return list.slice();
+
+    let needle = raw.toLowerCase();
+    const canNormalize = typeof String.prototype.normalize === 'function';
+    if (canNormalize) {
+      try {
+        needle = needle.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      } catch (err) {
+        needle = raw.toLowerCase();
+      }
+    }
+
+    return list.filter((entry) => {
+      if (!entry) return false;
+      const haystack = (entry.name + ' ' + entry.registryName).toLowerCase();
+      if (haystack.indexOf(needle) !== -1) return true;
+      if (!canNormalize) return false;
+      try {
+        return haystack.normalize('NFD').replace(/[\u0300-\u036f]/g, '').indexOf(needle) !== -1;
+      } catch (err) {
+        return false;
+      }
+    });
+  }
+
+  /**
+   * The frame URL for a camera, through the directory.
+   *
+   * Preferred over the source's own `feedUrl` for every reason above: CORS
+   * solved, the source's cadence applied for us, and a stale frame served rather
+   * than an error when the source is down. Returns null when the camera has no
+   * usable id, which is the only case where the raw feed URL is the better
+   * answer - see `imageSource`.
+   */
+  function frameProxyUrl(camera) {
+    const id = camera && typeof camera === 'object' ? text(camera.id) : text(camera);
+    if (!id) return null;
+    return FRAME_ENDPOINT + '/' + encodeURIComponent(id) + '/frame';
+  }
+
+  /**
+   * Where a camera's picture should be drawn from.
+   *
+   * The proxy first, because it is strictly the better source; the raw feed URL
+   * only as the fallback for a camera the directory will not proxy - which is
+   * legal (`proxyOk: false`) rather than technical, so it can change without
+   * anything breaking. `null` means neither, and the card says so instead of
+   * showing a broken frame.
+   */
+  function imageSource(camera) {
+    if (!camera) return null;
+    if (camera.proxyOk === false) return safeUrl(camera.imageUrl);
+    const proxied = frameProxyUrl(camera);
+    if (proxied) return proxied;
+    return safeUrl(camera.imageUrl);
+  }
+
+  // ==========================================================================
   // Controller-facing API
   // ==========================================================================
   /**
@@ -453,6 +719,58 @@
     });
     if (settings.onBudget) settings.onBudget(remainingBudget(settings.responseHeaders));
     return cameras;
+  }
+
+  /**
+   * The cameras of one *catalogued* city.
+   *
+   * The same engine as `findCameras`, asked a different way. `findCameras` has
+   * to guess a bounding box around a point, which is the only thing it can do
+   * for an arbitrary city - and a box drawn around Paris finds nothing, because
+   * Paris genuinely has nothing. This asks the directory to resolve a place it
+   * *knows*, which is what makes the camera browser work at all: the catalogue
+   * says where the cameras are, and this says which ones.
+   *
+   * Ranking is by the directory's own order rather than by distance, because a
+   * `?city=` answer is not centred on anything the app asked for - there is no
+   * point to measure from. The wall shows several at once, so "nearest to what"
+   * would be a fiction.
+   */
+  async function findRegionCameras(citySlug, options) {
+    const settings = options || {};
+    const query = regionQuery(citySlug);
+    if (!query || typeof settings.fetchJson !== 'function') return [];
+
+    const url = DIRECTORY_ENDPOINT +
+      '?city=' + encodeURIComponent(query) +
+      '&limit=' + (positiveInt(settings.limit) || REGION_FETCH_LIMIT) +
+      '&minTrust=' + (positiveInt(settings.minTrust) || MIN_TRUST);
+
+    let body;
+    try {
+      body = await settings.fetchJson(url);
+    } catch (err) {
+      // A 400 here means the catalogue and the directory have drifted apart -
+      // the city was withdrawn. It is reported, never cached as "none", so the
+      // next visit picks up the corrected index.
+      if (settings.onFailure) settings.onFailure(err);
+      return [];
+    }
+    if (!body) {
+      if (settings.onFailure) settings.onFailure(new Error('Camera directory returned no payload'));
+      return [];
+    }
+
+    const rawCameras = body && Array.isArray(body.cameras) ? body.cameras : [];
+    const cameras = rawCameras.reduce((list, raw) => {
+      if (raw && raw.verificationStatus === 'contradicted') return list;
+      const camera = normalizeCamera(raw, { pollSecondsByRegistry: settings.pollSecondsByRegistry });
+      if (camera) list.push(camera);
+      return list;
+    }, []);
+    if (settings.onBudget) settings.onBudget(remainingBudget(settings.responseHeaders));
+    if (settings.onResolved) settings.onResolved(body.resolved);
+    return cameras.slice(0, REGION_CANDIDATE_LIMIT);
   }
 
   // ==========================================================================
@@ -516,8 +834,15 @@
 
   return {
     DIRECTORY_ENDPOINT,
+    REGISTRIES_ENDPOINT,
+    FRAME_ENDPOINT,
+    REGION_TITLES,
+    COUNTRY_FLAGS,
     BBOX_RADIUS_DEG,
     MIN_TRUST,
+    CANDIDATE_LIMIT,
+    REGION_CANDIDATE_LIMIT,
+    REGION_FETCH_LIMIT,
     DEFAULT_POLL_SECONDS,
     STREAM_PREFERENCE_KM,
     MIN_REMAINING_BUDGET,
@@ -537,5 +862,13 @@
     nextFrameUrl,
     cacheKey,
     findCameras,
+    findRegionCameras,
+    regionQuery,
+    regionTitle,
+    catalogRegions,
+    groupRegionsByRegistry,
+    filterRegions,
+    frameProxyUrl,
+    imageSource,
   };
 });

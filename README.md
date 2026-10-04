@@ -318,6 +318,10 @@ Coverage is real but regional, and the app treats absence as a normal answer rat
 
 A city outside these gets one short line of text. Probing the directory for any of the 72 benchmark cities is what produced that list — `node tools/probe-cameras.js` will re-run the check.
 
+### Finding cities that do have cameras
+
+The **Live Cameras** mode turns the directory's coverage index into a browsable city catalogue. It lists every camera-covered city by publishing registry, then opens a live frame wall beside that city's current climate and links directly to the full seven-day forecast. Coverage comes from the same `/api/registries` response the app already fetches for source refresh cadences, so discovering 27 covered cities adds no per-city lookup requests. Each chosen city's camera list costs one request; the frame endpoint handles CORS and its own cache cadence, and the browser wall revalidates only at that source cadence. The catalogue does not invent per-city camera counts from registry-wide totals.
+
 ### How it stays cheap and polite
 
 - **Lazy.** The directory is rate-limited, so a panel is only asked about once it is actually scrolled into view (`IntersectionObserver`, 200 px margin), with lookups spaced 900 ms apart. A 72-card filter does not become 72 simultaneous requests.

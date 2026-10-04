@@ -304,7 +304,7 @@ function buildDom() {
   const tablist = new StubNode('div');
   tablist.className = 'search-mode-tabs';
   body.appendChild(tablist);
-  ['tab-mode-city', 'tab-mode-compare', 'tab-mode-climate'].forEach((id) => {
+  ['tab-mode-city', 'tab-mode-compare', 'tab-mode-climate', 'tab-mode-cameras'].forEach((id) => {
     const tab = registry.get(id);
     tab.className = 'mode-tab';
     tablist.appendChild(tab);
@@ -895,10 +895,12 @@ test('only the active tab is a tab stop, and the arrow keys reach the others', a
   const city = app.el('tab-mode-city');
   const compare = app.el('tab-mode-compare');
   const climate = app.el('tab-mode-climate');
+  const cameras = app.el('tab-mode-cameras');
 
   assert.equal(city.tabIndex, 0, 'the active tab holds the tab stop');
   assert.equal(compare.tabIndex, -1);
   assert.equal(climate.tabIndex, -1);
+  assert.equal(cameras.tabIndex, -1);
 
   // The keydown is delivered on the focused tab and bubbles to the tablist, the
   // same way a real delegated listener sees it.
@@ -911,25 +913,55 @@ test('only the active tab is a tab stop, and the arrow keys reach the others', a
 
   press('tab-mode-climate', 'ArrowRight');
   await flush();
+  assert.equal(cameras.getAttribute('aria-selected'), 'true', 'the fourth tab follows Climate Filter');
+
+  press('tab-mode-cameras', 'ArrowRight');
+  await flush();
   assert.equal(app.el('tab-mode-city').getAttribute('aria-selected'), 'true', 'it wraps around');
 
   press('tab-mode-city', 'End');
   await flush();
-  assert.equal(app.el('tab-mode-climate').getAttribute('aria-selected'), 'true', 'End jumps to the last tab');
+  assert.equal(cameras.getAttribute('aria-selected'), 'true', 'End jumps to the last tab');
 
-  press('tab-mode-climate', 'Home');
+  press('tab-mode-cameras', 'Home');
   await flush();
   assert.equal(app.el('tab-mode-city').getAttribute('aria-selected'), 'true', 'Home jumps to the first');
 
   press('tab-mode-city', 'ArrowLeft');
   await flush();
-  assert.equal(app.el('tab-mode-climate').getAttribute('aria-selected'), 'true', 'ArrowLeft wraps backwards');
+  assert.equal(cameras.getAttribute('aria-selected'), 'true', 'ArrowLeft wraps backwards');
 
   // Reaching Compare by keyboard selects it, not just focuses it.
+  press('tab-mode-cameras', 'ArrowLeft');
+  await flush();
   press('tab-mode-climate', 'ArrowLeft');
   await flush();
   assert.equal(compare.getAttribute('aria-selected'), 'true');
   assert.equal(app.el('compare-section').classList.contains('hidden'), false);
+});
+
+test('the climate results card is hidden outside Climate Filter, including Compare and Live Cameras', async () => {
+  const app = bootApp(stubFetch());
+  await flush();
+
+  const results = app.el('climate-results-section');
+  const cameras = app.el('camera-browser-section');
+  results.classList.remove('hidden');
+
+  app.el('tab-mode-compare').click();
+  await flush();
+  assert.equal(results.classList.contains('hidden'), true);
+
+  results.classList.remove('hidden');
+  app.el('tab-mode-cameras').click();
+  await flush();
+  assert.equal(results.classList.contains('hidden'), true);
+  assert.equal(cameras.classList.contains('hidden'), false);
+
+  app.el('tab-mode-climate').click();
+  await flush();
+  assert.equal(results.classList.contains('hidden'), false, 'Climate Filter owns its results section');
+  assert.equal(cameras.classList.contains('hidden'), true);
 });
 
 test('a city load that lands after the switch does not cover the comparison', async () => {

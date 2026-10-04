@@ -120,7 +120,7 @@ test('fields the directory adds that we do not understand are dropped, not forwa
   assert.equal(camera.somethingUnexpected, undefined);
   assert.deepEqual(
     Object.keys(camera).sort(),
-    ['attribution', 'attributionUrl', 'distanceKm', 'id', 'imageUrl', 'kind', 'latitude', 'longitude', 'name', 'pollSeconds', 'source', 'streamUrl', 'trustScore'].filter((k) => k in camera).sort(),
+    ['attribution', 'attributionUrl', 'distanceKm', 'id', 'imageUrl', 'kind', 'latitude', 'longitude', 'name', 'pollSeconds', 'proxyOk', 'source', 'streamUrl', 'trustScore'].filter((k) => k in camera).sort(),
     'the normalised shape is closed to whatever the directory sends'
   );
 });
@@ -414,4 +414,69 @@ test('a camera that can play is chosen over an equally close still, but not over
     'past the preference radius, "nearest" has to mean nearest again');
   assert.equal(C.bestCamera([stream, still]).id, 'stream', 'a stream that is nearest is simply kept');
   assert.equal(C.bestCamera([]), null);
+});
+
+test('the registry index becomes one honest, de-duplicated entry per covered city', () => {
+  const catalogue = C.catalogRegions([
+    {
+      slug: 'ontario-511', name: 'Ontario 511', city: 'ontario', country: 'CA',
+      cities: ['hamilton', 'toronto', 'niagara falls'], activeCameras: 1200,
+      attribution: 'Ontario 511', licenseUrl: 'https://example.org/licence', minPollIntervalS: 60,
+    },
+    {
+      slug: 'toronto-city', name: 'City of Toronto', city: 'toronto', country: 'CA',
+      cities: ['toronto'], activeCameras: 300,
+      attribution: 'City of Toronto', licenseUrl: 'https://example.org/toronto', minPollIntervalS: 300,
+    },
+  ]);
+
+  assert.deepEqual(catalogue.map((entry) => entry.query), ['hamilton', 'toronto', 'niagara-falls']);
+  assert.equal(catalogue[0].name, 'Hamilton');
+  assert.equal(catalogue[0].flag, '🇨🇦');
+  assert.equal(catalogue[0].pollSeconds, 60);
+  assert.equal(catalogue[1].registry, 'ontario-511', 'the first publishing registry owns the deduplicated city');
+  assert.equal(Object.hasOwn(catalogue[0], 'count'), false, 'registry-wide totals are never misrepresented as city totals');
+});
+
+test('the camera city catalogue groups by registry and filters names without regard to case', () => {
+  const catalogue = [
+    { query: 'san-francisco', name: 'San Francisco', registry: 'cal', registryName: 'Caltrans', country: 'US' },
+    { query: 'san-diego', name: 'San Diego', registry: 'cal', registryName: 'Caltrans', country: 'US' },
+    { query: 'london', name: 'London', registry: 'tfl', registryName: 'Transport for London', country: 'GB' },
+  ];
+  const groups = C.groupRegionsByRegistry(catalogue);
+
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups[0].cities.map((entry) => entry.name), ['San Francisco', 'San Diego']);
+  assert.deepEqual(C.filterRegions(catalogue, 'SAN').map((entry) => entry.name), ['San Francisco', 'San Diego']);
+  assert.deepEqual(C.filterRegions(catalogue, '').map((entry) => entry.name), ['San Francisco', 'San Diego', 'London']);
+});
+
+test('catalogue slugs are safe directory queries and frame URLs encode camera ids', () => {
+  assert.equal(C.regionQuery('San Francisco'), 'san-francisco');
+  assert.equal(C.regionTitle('san-francisco'), 'San Francisco');
+  assert.equal(C.frameProxyUrl({ id: 'tfl-00001.01251' }), 'https://datumfeed.com/api/cameras/tfl-00001.01251/frame');
+  assert.equal(C.frameProxyUrl('a/b'), 'https://datumfeed.com/api/cameras/a%2Fb/frame');
+  assert.equal(C.imageSource({ id: 'cam 1', imageUrl: 'https://source.example/image.jpg' }),
+    'https://datumfeed.com/api/cameras/cam%201/frame');
+  const nonProxyable = C.normalizeCamera(rawCamera({ registry: registry({ proxyOk: false }) }));
+  assert.equal(C.imageSource(nonProxyable), 'https://example.org/frame.jpg',
+    'a registry that does not permit proxying is rendered directly');
+});
+
+test('findRegionCameras asks the directory to resolve its catalogued city and caps the wall', async () => {
+  let requested;
+  let resolved;
+  const raw = Array.from({ length: 13 }, (_, index) => rawCamera({ id: `camera-${index}` }));
+  const cameras = await C.findRegionCameras('San Francisco', {
+    fetchJson: async (url) => {
+      requested = url;
+      return { cameras: raw, resolved: { city: 'san francisco' } };
+    },
+    onResolved: (value) => { resolved = value; },
+  });
+
+  assert.match(requested, /\?city=san-francisco&limit=30&minTrust=10/);
+  assert.equal(cameras.length, C.REGION_CANDIDATE_LIMIT);
+  assert.equal(resolved.city, 'san francisco');
 });

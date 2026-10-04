@@ -865,6 +865,29 @@
     compareForecastCard: document.getElementById('compare-forecast-card'),
     compareForecastTable: document.getElementById('compare-forecast-table'),
     compareFreshness: document.getElementById('compare-freshness'),
+
+    // Live Cameras (the camera browser)
+    tabModeCameras: document.getElementById('tab-mode-cameras'),
+    cameraBrowserSection: document.getElementById('camera-browser-section'),
+    cameraCatalogueCard: document.querySelector('.camera-catalogue-card'),
+    cameraCatalogueCount: document.getElementById('camera-catalogue-count'),
+    cameraCatalogueSubtitle: document.getElementById('camera-catalogue-subtitle'),
+    cameraFilterInput: document.getElementById('camera-city-filter'),
+    cameraCatalogueLoading: document.getElementById('camera-catalogue-loading'),
+    cameraCatalogueError: document.getElementById('camera-catalogue-error'),
+    cameraCatalogueEmpty: document.getElementById('camera-catalogue-empty'),
+    cameraCatalogueGroups: document.getElementById('camera-catalogue-groups'),
+    cameraCityCard: document.getElementById('camera-city-card'),
+    cameraCityName: document.getElementById('camera-city-name'),
+    cameraCityCount: document.getElementById('camera-city-count'),
+    cameraCitySource: document.getElementById('camera-city-source'),
+    cameraCityLoading: document.getElementById('camera-city-loading'),
+    cameraCityEmpty: document.getElementById('camera-city-empty'),
+    cameraWall: document.getElementById('camera-wall'),
+    cameraCityClimateBody: document.getElementById('camera-city-climate-body'),
+    cameraCityClimate: document.getElementById('camera-city-climate'),
+    cameraBackAllBtn: document.getElementById('camera-back-all-btn'),
+    cameraOpenForecastBtn: document.getElementById('camera-open-forecast-btn'),
   };
 
   // The hero's clock surfaces all read the selected city's timezone, so they are
@@ -2073,14 +2096,17 @@
     // mode - the default city starts loading on page load. Rendering the data
     // is still right, but the dashboard must not be pushed over whichever
     // surface is currently on screen.
-    if (state.searchMode !== 'compare') elements.dashboard.classList.remove('hidden');
+    if (!modeOwnsMainArea(state.searchMode)) elements.dashboard.classList.remove('hidden');
 
     // Paint the clocks now that the dashboard is actually visible, so the city
     // never flashes placeholder digits for a second while the ticker waits.
     refreshClocks();
 
-    // Show Back Button if user came from climate search
-    if (state.matchingCities.length > 0) {
+    // Show Back Button if user came from climate search - and only while the
+    // results it points at are on screen. Without the mode check the bar
+    // outlived its own grid and offered a destination the current mode cannot
+    // show, which is the same leak as the results card itself.
+    if (state.matchingCities.length > 0 && state.searchMode === 'climate') {
       elements.backToResultsBar.classList.remove('hidden');
       elements.backToResultsText.textContent = t(
         'climate.backToMatching',
@@ -2998,6 +3024,19 @@ ${CAMERA_PANEL_HTML}
     cadenceByRegistry: null,
     cadenceFetchedAt: 0,
     cadenceRequest: null,
+    /** The registry index itself, kept whole so it can also serve the browser. */
+    registries: null,
+    /** Every city the directory covers, derived from the index above. */
+    catalogue: null,
+    /** The catalogue city currently open in the Live Cameras mode, or null. */
+    openCameraCity: null,
+    /** Cameras for that city, and whether a request is in flight for it. */
+    openCameraWall: [],
+    openCameraRequest: null,
+    openCameraWeather: null,
+    cameraWallTimer: null,
+    /** The query typed into the catalogue filter, kept for language switches. */
+    cameraFilterQuery: '',
     remainingBudget: null,
     /** Epoch ms before which the directory is not asked again; 0 = may ask. */
     budgetSpentAt: 0,
@@ -3036,16 +3075,26 @@ ${CAMERA_PANEL_HTML}
     }
     syncCameraToggle();
     refreshCityCameras();
+    // The wall is not a panel, so it has to be told separately. Off means no
+    // frames are requested at all - which for a wall of twelve images is the
+    // difference between a polite visitor and a burst.
+    refreshCameraWall();
   }
 
-  // --- The per-registry polite refresh cadence ------------------------------
+  // --- The registry index: cadences and coverage in one request --------------
 
   /**
    * Each source publishes how often it wants to be refreshed (a national
-   * highway feed and a municipal one have very different answers). Fetched once
-   * per session and keyed by registry slug.
+   * highway feed and a municipal one have very different answers), and - less
+   * obviously - *which cities it covers*.
+   *
+   * One response answers both, so it is fetched once per session and kept whole
+   * rather than reduced to a cadence map on arrival. The camera browser is built
+   * from the same list, which is what makes "everywhere a camera exists" cost
+   * exactly the one request the app was already spending on cadences rather than
+   * one per city.
    */
-  async function cameraCadence() {
+  async function cameraRegistries() {
     const engine = cameraEngine();
     if (!engine) return null;
     if (cameraState.cadenceByRegistry && Date.now() - cameraState.cadenceFetchedAt < CAMERA_REGISTRY_TTL) {
@@ -3067,6 +3116,8 @@ ${CAMERA_PANEL_HTML}
           }
         });
         cameraState.cadenceByRegistry = map;
+        cameraState.registries = list;
+        cameraState.catalogue = engine.catalogRegions ? engine.catalogRegions(list) : [];
         cameraState.cadenceFetchedAt = Date.now();
         return map;
       } catch (err) {
@@ -3078,6 +3129,11 @@ ${CAMERA_PANEL_HTML}
     })();
 
     return cameraState.cadenceRequest;
+  }
+
+  /** Kept as the name the panels already use: it is the cadence map they read. */
+  function cameraCadence() {
+    return cameraRegistries();
   }
 
   // --- Mounting the panel anywhere a city is shown --------------------------
@@ -3456,6 +3512,9 @@ ${CAMERA_PANEL_HTML}
         if (record && record.status === 'unknown') cameraState.records.delete(cityId);
       });
       refreshCityCameras();
+      // A city left showing "lookup unavailable" should recover on its own too,
+      // rather than needing the visitor to leave and come back.
+      refreshCameraWall();
     }, CAMERA_RETRY_COOLDOWN_MS);
   }
 
@@ -4010,6 +4069,794 @@ ${CAMERA_PANEL_HTML}
   }
 
   // ==========================================================================
+  // The Camera Browser
+  // --------------------------------------------------------------------------
+  // Why this surface exists at all
+  //
+  // The per-city camera panel is honest about absence, and that honesty is the
+  // problem from a visitor's point of view: the directory covers seven regional
+  // registries, so "no free public camera for this city" is the correct answer
+  // for the large majority of the 84 benchmark cities. A visitor who searches
+  // Paris sees one line of text, concludes the feature is broken, and leaves -
+  // never finding out that London, Seattle and Toronto are all full of them.
+  //
+  // So the app stops making them guess. This mode inverts the question from
+  // "does my city have a camera?" to "where *are* the cameras?", answers it from
+  // the directory's own coverage index, and puts every covered city one click
+  // away.
+  //
+  // The economics that make it affordable:
+  //  * **The catalogue is free.** `GET /api/registries` names every covered city
+  //    and the app was already fetching it for refresh cadences, so the whole
+  //    list costs zero additional requests.
+  //  * **A wall costs one request to open** and no requests to stay live: frames
+  //    come from the directory's frame endpoint with the source's own cadence in
+  //    `Cache-Control`, so the browser keeps them moving on its own. There is no
+  //    poller here at all.
+  //  * **A city's forecast is only fetched once the visitor opens it**, and only
+  //    for the six fields the strip actually shows.
+  // ==========================================================================
+
+  /** True when the camera browser has somewhere to render. */
+  function cameraBrowserReady() {
+    return Boolean(elements.cameraBrowserSection && elements.cameraCatalogueGroups);
+  }
+
+  /**
+   * Show the catalogue and populate it.
+   *
+   * Cheap to call on every entry into the mode: once the index has been read the
+   * catalogue is cached for the session and this only repaints.
+   */
+  function renderCameraCatalogue() {
+    if (!cameraBrowserReady()) return;
+    if (cameraState.openCameraCity) {
+      if (elements.cameraCatalogueCard) elements.cameraCatalogueCard.hidden = true;
+      if (elements.cameraCityCard) elements.cameraCityCard.hidden = false;
+      return;
+    }
+
+    if (cameraState.catalogue && cameraState.catalogue.length) {
+      paintCameraCatalogue(cameraState.catalogue);
+      return;
+    }
+
+    if (elements.cameraCatalogueLoading) elements.cameraCatalogueLoading.hidden = false;
+    if (elements.cameraCatalogueError) elements.cameraCatalogueError.hidden = true;
+    if (elements.cameraCatalogueGroups) elements.cameraCatalogueGroups.innerHTML = '';
+
+    cameraRegistries().then(() => {
+      if (elements.cameraCatalogueLoading) elements.cameraCatalogueLoading.hidden = true;
+      // An empty catalogue means the index could not be read - not that the
+      // world has no cameras - so it is reported as the failure it is.
+      if (cameraState.catalogue && cameraState.catalogue.length) {
+        paintCameraCatalogue(cameraState.catalogue);
+      } else {
+        showCameraCatalogueError();
+      }
+    });
+  }
+
+  function paintCameraCatalogue(catalogue) {
+    if (!cameraBrowserReady()) return;
+    if (elements.cameraCatalogueError) elements.cameraCatalogueError.hidden = true;
+    if (elements.cameraCatalogueEmpty) elements.cameraCatalogueEmpty.hidden = true;
+
+    const engine = cameraEngine();
+    const matches = engine && typeof engine.filterRegions === 'function'
+      ? engine.filterRegions(catalogue, cameraState.cameraFilterQuery)
+      : catalogue.slice();
+
+    if (elements.cameraCatalogueCount) {
+      elements.cameraCatalogueCount.textContent = t(
+        'cameraHub.total',
+        { count: catalogue.length, sources: new Set(catalogue.map((entry) => entry.registry)).size },
+        `${catalogue.length} cities · ${new Set(catalogue.map((entry) => entry.registry)).size} sources`
+      );
+    }
+
+    const host = elements.cameraCatalogueGroups;
+    host.innerHTML = '';
+
+    if (!matches.length) {
+      showCameraCatalogueEmpty(cameraState.cameraFilterQuery);
+      return;
+    }
+
+    // Grouped by the source that publishes the cameras, which is also the
+    // licence whose attribution has to travel with them. A filtered list is
+    // regrouped from the survivors, so a filter never leaves a city stranded
+    // under a heading that no longer has anything in it.
+    const groups = engine && typeof engine.groupRegionsByRegistry === 'function'
+      ? engine.groupRegionsByRegistry(matches)
+      : [{ registryName: '', cities: matches }];
+
+    groups.forEach((group) => {
+      host.appendChild(buildCameraCatalogueGroup(group));
+    });
+  }
+
+  function buildCameraCatalogueGroup(group) {
+    const section = document.createElement('section');
+    section.className = 'camera-catalogue-group';
+
+    const head = document.createElement('div');
+    head.className = 'camera-catalogue-group-head';
+
+    const title = document.createElement('h3');
+    title.className = 'camera-catalogue-group-title';
+    // The flag is a decorative convenience; the country is named in text, and
+    // the source name is what a visitor actually needs to see.
+    title.textContent = (group.flag ? group.flag + ' ' : '') + (group.registryName || group.registry);
+    head.appendChild(title);
+
+    const count = document.createElement('span');
+    count.className = 'camera-catalogue-group-count';
+    count.textContent = tp(
+      'cameraHub.cityCountOne',
+      'cameraHub.cityCountMany',
+      group.cities.length,
+      { count: group.cities.length },
+      `${group.cities.length} city`,
+      `${group.cities.length} cities`
+    );
+    head.appendChild(count);
+
+    // The registry's own required wording, shown once per group rather than on
+    // every tile. It is a licence condition of showing these frames at all, so
+    // it is never collapsed away or truncated.
+    if (group.attribution) {
+      const credit = document.createElement('p');
+      credit.className = 'camera-catalogue-group-credit';
+      const link = document.createElement('a');
+      link.href = group.attributionUrl || '#';
+      if (!group.attributionUrl) link.hidden = true;
+      else {
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+      }
+      link.textContent = group.attribution;
+      credit.appendChild(link);
+      section.appendChild(credit);
+    }
+
+    section.insertBefore(head, section.firstChild);
+
+    const list = document.createElement('div');
+    list.className = 'camera-catalogue-grid';
+    list.setAttribute('role', 'list');
+    group.cities.forEach((entry) => list.appendChild(buildCameraCityTile(entry)));
+    section.appendChild(list);
+
+    return section;
+  }
+
+  function buildCameraCityTile(entry) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'camera-city-tile';
+    button.setAttribute('role', 'listitem');
+    button.dataset.cameraCity = entry.query;
+
+    const name = document.createElement('span');
+    name.className = 'camera-city-tile-name';
+    name.textContent = entry.name;
+    button.appendChild(name);
+
+    const meta = document.createElement('span');
+    meta.className = 'camera-city-tile-meta';
+    // A dot rather than the word "live": the tile is a link to the city's
+    // cameras, and the honest claim at this point is only that it has any.
+    const dot = document.createElement('span');
+    dot.className = 'camera-city-tile-dot';
+    dot.setAttribute('aria-hidden', 'true');
+    meta.appendChild(dot);
+    const label = document.createElement('span');
+    label.textContent = t('cameraHub.hasCameras', null, 'Has live cameras');
+    meta.appendChild(label);
+    button.appendChild(meta);
+
+    button.addEventListener('click', () => openCameraCity(entry));
+    return button;
+  }
+
+  function showCameraCatalogueError() {
+    if (!cameraBrowserReady()) return;
+    if (elements.cameraCatalogueGroups) elements.cameraCatalogueGroups.innerHTML = '';
+    if (elements.cameraCatalogueEmpty) elements.cameraCatalogueEmpty.hidden = true;
+    if (elements.cameraCatalogueError) {
+      elements.cameraCatalogueError.textContent = t(
+        'cameraHub.unavailable',
+        null,
+        'The camera directory could not be reached, so the list of camera cities is unavailable right now.'
+      );
+      elements.cameraCatalogueError.hidden = false;
+    }
+  }
+
+  function showCameraCatalogueEmpty(query) {
+    if (!cameraBrowserReady()) return;
+    if (elements.cameraCatalogueError) elements.cameraCatalogueError.hidden = true;
+    if (elements.cameraCatalogueEmpty) {
+      elements.cameraCatalogueEmpty.textContent = t(
+        'cameraHub.empty',
+        { query },
+        `No camera city matches "${query}".`
+      );
+      elements.cameraCatalogueEmpty.hidden = false;
+    }
+  }
+
+  /** The shared search box and the catalogue's own field drive the same filter. */
+  function setCameraFilterQuery(query) {
+    const next = typeof query === 'string' ? query : '';
+    if (next === cameraState.cameraFilterQuery) return;
+    cameraState.cameraFilterQuery = next;
+    if (elements.cameraFilterInput && elements.cameraFilterInput.value !== next) {
+      elements.cameraFilterInput.value = next;
+    }
+    if (state.searchMode === 'cameras' && cameraState.catalogue && cameraState.catalogue.length) {
+      paintCameraCatalogue(cameraState.catalogue);
+    }
+  }
+
+  /**
+   * Enter in the shared search box, in camera mode.
+   *
+   * An exact catalogue hit opens. Anything else filters to the best match and
+   * says so, rather than guessing at a city the directory does not cover: the
+   * whole point of this mode is that what it shows exists.
+   */
+  async function handleCameraCitySearch(query) {
+    const engine = cameraEngine();
+    if (!engine || !cameraState.catalogue) {
+      await cameraRegistries();
+      if (!cameraState.catalogue) return;
+    }
+    const catalogue = cameraState.catalogue;
+    const wanted = String(query || '').trim().toLowerCase();
+    if (!wanted) return;
+
+    const needle = engine.regionQuery(wanted);
+    const exact = catalogue.find((entry) => entry.query === needle);
+    if (exact) {
+      openCameraCity(exact);
+      return;
+    }
+
+    const matches = engine.filterRegions(catalogue, wanted);
+    setCameraFilterQuery(wanted);
+    if (matches.length === 1) {
+      openCameraCity(matches[0]);
+      return;
+    }
+    // Left on the filtered catalogue: the visitor can now see the real options
+    // instead of being told, wrongly, that their guess was the only one.
+    if (elements.cameraCatalogueGroups) elements.cameraCatalogueGroups.scrollIntoView({ block: 'nearest' });
+  }
+
+  /**
+   * Open a camera city by name, from a popular-city chip.
+   *
+   * A chip the catalogue knows opens the wall. A chip it does not know falls
+   * through to the ordinary forecast, where the glance card's own camera panel
+   * answers "no free public camera for this city" - which is the right outcome
+   * for Paris, and a dead end the visitor should never be left in.
+   */
+  function openCameraCityFromName(name) {
+    const engine = cameraEngine();
+    const wanted = engine && typeof engine.regionQuery === 'function' ? engine.regionQuery(name) : '';
+    const entry = (cameraState.catalogue || []).find((item) => item.query === wanted);
+
+    if (entry) {
+      openCameraCity(entry);
+      return;
+    }
+    setMode('city');
+    handleCitySearch(name);
+  }
+
+  // --- One chosen city --------------------------------------------------------
+
+  /**
+   * Open a camera city's wall.
+   *
+   * The climate strip is requested in parallel with the cameras rather than
+   * after them, because they are independent and the visitor wants both at once.
+   */
+  async function openCameraCity(entry) {
+    if (!cameraBrowserReady() || !entry) return;
+    const engine = cameraEngine();
+    if (!engine) return;
+    if (cameraState.openCameraCity === entry && (cameraState.openCameraRequest || cameraState.openCameraWall.length)) return;
+
+    cameraState.openCameraCity = entry;
+    cameraState.openCameraWall = [];
+    cameraState.openCameraWeather = null;
+
+    if (elements.cameraCatalogueCard) elements.cameraCatalogueCard.hidden = true;
+    if (elements.cameraCityCard) elements.cameraCityCard.hidden = false;
+    if (elements.cameraCityName) elements.cameraCityName.textContent = entry.name;
+    if (elements.cameraCitySource) {
+      elements.cameraCitySource.textContent = (entry.flag ? entry.flag + ' ' : '')
+        + (entry.registryName || entry.registry);
+    }
+    if (elements.cameraCityCount) elements.cameraCityCount.textContent = '';
+    if (elements.cameraCityEmpty) elements.cameraCityEmpty.hidden = true;
+    if (elements.cameraCityLoading) elements.cameraCityLoading.hidden = false;
+    if (elements.cameraWall) elements.cameraWall.innerHTML = '';
+    if (elements.cameraCityClimateBody) elements.cameraCityClimateBody.innerHTML = '';
+    if (elements.cameraCityClimate) elements.cameraCityClimate.hidden = true;
+    if (elements.cameraOpenForecastBtn) elements.cameraOpenForecastBtn.disabled = true;
+    if (elements.cameraCityCard) elements.cameraCityCard.scrollIntoView({ block: 'start' });
+
+    renderCameraCityClimate(entry);
+
+    if (cameraLookupBlocked()) {
+      finishCameraCityLoad(t('cameraHub.throttled', null, 'The camera directory is rate-limiting us, so this city cannot be opened right now.'));
+      return;
+    }
+    if (!camerasEnabled()) {
+      finishCameraCityLoad(t('camera.off', null, 'Live cameras are off'));
+      if (elements.cameraOpenForecastBtn) elements.cameraOpenForecastBtn.disabled = false;
+      return;
+    }
+
+    cameraState.openCameraRequest = (async () => {
+      const headerReader = {};
+      let lookupFailed = false;
+      try {
+        const cadence = await cameraCadence();
+        const cameras = await engine.findRegionCameras(entry.query, {
+          fetchJson: (url) => fetchCameraJson(url, headerReader),
+          pollSecondsByRegistry: cadence,
+          onBudget: (remaining) => { cameraState.remainingBudget = remaining; },
+          onFailure: (err) => {
+            lookupFailed = true;
+            if (err && err.throttled) blockCameraLookups();
+          },
+        });
+        if (engine.isBudgetExhausted && engine.isBudgetExhausted(cameraState.remainingBudget)) {
+          blockCameraLookups();
+        }
+        if (cameraState.openCameraCity !== entry) return;
+        cameraState.openCameraWall = cameras;
+        if (lookupFailed) {
+          finishCameraCityLoad(t('cameraHub.unavailable', null, 'The camera directory could not be reached right now.'));
+          if (elements.cameraOpenForecastBtn) elements.cameraOpenForecastBtn.disabled = false;
+          return;
+        }
+        if (!camerasEnabled()) {
+          finishCameraCityLoad(t('camera.off', null, 'Live cameras are off'));
+          return;
+        }
+        paintCameraWall(cameras, entry);
+      } catch (err) {
+        console.warn('Camera city lookup failed:', err);
+        if (cameraState.openCameraCity === entry) {
+          finishCameraCityLoad(t('cameraHub.unavailable', null, 'The camera directory could not be reached right now.'));
+        }
+      } finally {
+        cameraState.openCameraRequest = null;
+      }
+    })();
+  }
+
+  function finishCameraCityLoad(message) {
+    if (elements.cameraCityLoading) elements.cameraCityLoading.hidden = true;
+    if (elements.cameraOpenForecastBtn) elements.cameraOpenForecastBtn.disabled = false;
+    if (message) {
+      if (elements.cameraCityEmpty) {
+        elements.cameraCityEmpty.textContent = message;
+        elements.cameraCityEmpty.hidden = false;
+      }
+    }
+  }
+
+  /**
+   * The wall.
+   *
+   * Every frame is a plain `<img>` pointing at the directory's frame endpoint,
+   * and that is the whole mechanism: the response carries the source's own
+   * refresh cadence in `Cache-Control`, so the browser revalidates each frame on
+   * its own schedule and the app never runs a timer. A camera that publishes a
+   * *stream* instead of a still is played in a `<video>`, because a still frame
+   * would understate what it publishes.
+   *
+   * Nothing is written with innerHTML: every name here is third-party text from
+   * the directory, and `safeUrl` in the engine is what guarantees a feed URL
+   * can only ever be an http(s) attribute.
+   */
+  function paintCameraWall(cameras, entry) {
+    if (!elements.cameraWall) return;
+    const engine = cameraEngine();
+    const host = elements.cameraWall;
+    host.innerHTML = '';
+
+    if (elements.cameraCityLoading) elements.cameraCityLoading.hidden = true;
+    if (elements.cameraCityEmpty) elements.cameraCityEmpty.hidden = true;
+
+    if (elements.cameraCityCount) {
+      const total = cameras.length;
+      elements.cameraCityCount.textContent = tp(
+        'cameraHub.cameraCountOne',
+        'cameraHub.cameraCountMany',
+        total,
+        { count: total },
+        `${total} camera`,
+        `${total} cameras`
+      );
+    }
+
+    if (!cameras.length) {
+      if (elements.cameraCityEmpty) {
+        elements.cameraCityEmpty.textContent = t(
+          'cameraHub.noFrames',
+          { city: entry ? entry.name : '' },
+          'No usable camera frame for this city right now.'
+        );
+        elements.cameraCityEmpty.hidden = false;
+      }
+      if (elements.cameraOpenForecastBtn) elements.cameraOpenForecastBtn.disabled = false;
+      return;
+    }
+
+    cameras.forEach((camera) => host.appendChild(buildCameraWallTile(camera, engine)));
+    if (elements.cameraOpenForecastBtn) elements.cameraOpenForecastBtn.disabled = false;
+    scheduleCameraWallRefresh(cameras);
+  }
+
+  function buildCameraWallTile(camera, engine) {
+    const tile = document.createElement('figure');
+    tile.className = 'camera-wall-tile';
+    tile.setAttribute('role', 'listitem');
+
+    const stream = engine && typeof engine.isStream === 'function' && engine.isStream(camera);
+    const source = engine && typeof engine.imageSource === 'function' ? engine.imageSource(camera) : null;
+
+    if (stream) {
+      const video = document.createElement('video');
+      video.className = 'camera-wall-media';
+      video.muted = true;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.loop = true;
+      video.setAttribute('playsinline', '');
+      video.src = camera.streamUrl;
+      tile.appendChild(video);
+    } else if (source) {
+      const img = document.createElement('img');
+      img.className = 'camera-wall-media';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.src = source;
+      img.dataset.cameraFrameSource = source;
+      if (camera.imageUrl && camera.imageUrl !== source) img.dataset.cameraFrameFallback = camera.imageUrl;
+      // The place is named, not the camera: a visitor looking at a street knows
+      // where they are, and the name below carries the specific junction.
+      img.alt = t('camera.alt', { place: camera.name || camera.source || '' }, `Live camera view: ${camera.name || ''}`);
+      // A frame that fails is the source's problem, not a broken layout: the tile
+      // says so in place of the picture rather than leaving a silent blank.
+      img.addEventListener('error', () => {
+        const fallback = img.dataset.cameraFrameFallback;
+        if (fallback && img.dataset.cameraTriedFallback !== 'true') {
+          img.dataset.cameraTriedFallback = 'true';
+          img.src = fallback;
+          return;
+        }
+        img.remove();
+        const note = document.createElement('span');
+        note.className = 'camera-wall-note';
+        note.textContent = t('camera.offline', null, 'Camera unavailable');
+        tile.insertBefore(note, tile.firstChild);
+      });
+      tile.appendChild(img);
+    }
+
+    const badge = document.createElement('span');
+    badge.className = 'camera-wall-badge';
+    badge.setAttribute('aria-hidden', 'true');
+    const dot = document.createElement('span');
+    dot.className = 'camera-live-dot';
+    badge.appendChild(dot);
+    badge.appendChild(document.createTextNode(cameraBadgeLabel(camera)));
+    tile.appendChild(badge);
+
+    const caption = document.createElement('figcaption');
+    caption.className = 'camera-wall-caption';
+
+    const name = document.createElement('span');
+    name.className = 'camera-wall-name';
+    name.textContent = camera.name || camera.source || '';
+    caption.appendChild(name);
+
+    if (typeof camera.distanceKm === 'number') {
+      const distance = document.createElement('span');
+      distance.className = 'camera-wall-distance';
+      distance.textContent = tp(
+        'camera.distanceOne',
+        'camera.distanceMany',
+        camera.distanceKm,
+        { distance: camera.distanceKm },
+        `${camera.distanceKm} km away`,
+        `${camera.distanceKm} km away`
+      );
+      caption.appendChild(distance);
+    }
+
+    if (camera.attribution) {
+      const credit = document.createElement('a');
+      credit.className = 'camera-wall-credit';
+      credit.textContent = t('camera.attribution', { source: camera.attribution }, `Camera: ${camera.attribution}`);
+      if (camera.attributionUrl) {
+        credit.href = camera.attributionUrl;
+        credit.target = '_blank';
+        credit.rel = 'noopener noreferrer';
+      } else {
+        credit.setAttribute('aria-label', credit.textContent);
+      }
+      caption.appendChild(credit);
+    }
+
+    tile.appendChild(caption);
+    return tile;
+  }
+
+  /** Return to the catalogue, releasing whatever the wall was holding. */
+  function closeCameraCitySurface() {
+    if (cameraState.cameraWallTimer !== null) {
+      clearTimeout(cameraState.cameraWallTimer);
+      cameraState.cameraWallTimer = null;
+    }
+    if (cameraState.openCameraCity) {
+      cameraState.openCameraCity = null;
+      cameraState.openCameraWall = [];
+      // Frames are plain <img> elements, so dropping the subtree is the whole
+      // cleanup: the browser closes every connection with the last reference.
+      if (elements.cameraWall) elements.cameraWall.innerHTML = '';
+    }
+    if (!cameraBrowserReady()) return;
+    if (elements.cameraCityCard) elements.cameraCityCard.hidden = true;
+    if (elements.cameraCatalogueCard) elements.cameraCatalogueCard.hidden = false;
+  }
+
+  /**
+   * Revalidate the wall on the source's own cadence.
+   *
+   * The frame endpoint caches each upstream picture for precisely this long
+   * and publishes that duration in Cache-Control. After it expires, dropping
+   * and restoring the same `src` asks the browser to revalidate the resource;
+   * the server then either returns the newly polled frame or the last cached
+   * one. There is one timer for the visible city wall, never one per tile, and
+   * closing the city or switching the master toggle off releases it.
+   */
+  function scheduleCameraWallRefresh(cameras) {
+    if (cameraState.cameraWallTimer !== null) {
+      clearTimeout(cameraState.cameraWallTimer);
+      cameraState.cameraWallTimer = null;
+    }
+    if (!cameraState.openCameraCity || !camerasEnabled() || !Array.isArray(cameras) || !cameras.length) return;
+
+    const seconds = cameras.reduce((smallest, camera) => {
+      const requested = camera && Number.isFinite(camera.pollSeconds) && camera.pollSeconds > 0
+        ? camera.pollSeconds
+        : 60;
+      return Math.min(smallest, requested);
+    }, Infinity);
+    const delay = Math.max(15, seconds) * 1000;
+
+    cameraState.cameraWallTimer = setTimeout(() => {
+      cameraState.cameraWallTimer = null;
+      if (!cameraState.openCameraCity || !camerasEnabled() || !elements.cameraWall) return;
+      Array.from(elements.cameraWall.querySelectorAll('img[data-camera-frame-source]')).forEach((image) => {
+        const source = image.dataset.cameraFrameSource;
+        if (!source) return;
+        image.removeAttribute('src');
+        image.src = source;
+      });
+      scheduleCameraWallRefresh(cameraState.openCameraWall);
+    }, delay);
+  }
+
+  /**
+   * The master switch, applied to the wall.
+   *
+   * The panels each own their visibility, so `refreshCityCameras` drives them;
+   * the wall is a plain grid of images with none of that machinery, so it is
+   * repainted - or emptied - here instead.
+   */
+  function refreshCameraWall() {
+    if (!cameraBrowserReady() || !cameraState.openCameraCity) return;
+    if (camerasEnabled()) {
+      if (!cameraState.openCameraWall.length && !cameraState.openCameraRequest) {
+        openCameraCity(cameraState.openCameraCity);
+        return;
+      }
+      paintCameraWall(cameraState.openCameraWall, cameraState.openCameraCity);
+      return;
+    }
+    if (cameraState.cameraWallTimer !== null) {
+      clearTimeout(cameraState.cameraWallTimer);
+      cameraState.cameraWallTimer = null;
+    }
+    if (elements.cameraWall) elements.cameraWall.innerHTML = '';
+    finishCameraCityLoad(t('camera.off', null, 'Live cameras are off'));
+  }
+
+  // --- The city's climate, beside its frames ---------------------------------
+
+  /**
+   * The city's own current conditions.
+   *
+   * Six fields from the same Open-Meteo endpoint the dashboard uses, and only
+   * once the visitor has actually opened a camera city - a list of 27 places
+   * does not need 27 forecasts behind it. Coordinates come from the bundled
+   * benchmark database where it already has the city (free and exact), and from
+   * the same geocoder the search box uses where it does not.
+   */
+  async function renderCameraCityClimate(entry) {
+    const body = elements.cameraCityClimateBody;
+    const card = elements.cameraCityClimate;
+    if (!body || !card) return;
+
+    const city = await resolveCameraRegionCity(entry);
+    if (cameraState.openCameraCity !== entry || !city) return;
+
+    const params = new URLSearchParams({
+      latitude: city.latitude,
+      longitude: city.longitude,
+      current: [
+        'temperature_2m',
+        'relative_humidity_2m',
+        'apparent_temperature',
+        'is_day',
+        'weather_code',
+        'wind_speed_10m',
+      ].join(','),
+      timezone: city.timezone || 'auto',
+    });
+
+    let data;
+    try {
+      data = await fetchJson(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+    } catch (err) {
+      if (cameraState.openCameraCity === entry) card.hidden = true;
+      return;
+    }
+    if (cameraState.openCameraCity !== entry || !data) return;
+
+    cameraState.openCameraWeather = data;
+    paintCameraCityClimate(entry, data);
+  }
+
+  function paintCameraCityClimate(entry, data) {
+    const body = elements.cameraCityClimateBody;
+    const card = elements.cameraCityClimate;
+    if (!body || !card || cameraState.openCameraCity !== entry || !data) return;
+    const current = data.current || {};
+    body.innerHTML = '';
+    card.hidden = false;
+
+    const temp = document.createElement('div');
+    temp.className = 'camera-city-climate-temp';
+    const value = document.createElement('span');
+    value.className = 'camera-city-climate-value';
+    value.textContent = formatTemp(current.temperature_2m);
+    temp.appendChild(value);
+    const symbol = document.createElement('span');
+    symbol.className = 'camera-city-climate-symbol';
+    symbol.textContent = getTempUnitSymbol();
+    temp.appendChild(symbol);
+    body.appendChild(temp);
+
+    const details = document.createElement('div');
+    details.className = 'camera-city-climate-details';
+
+    const code = current.weather_code;
+    const info = WMO_MAP[code] || { icon: 'clear' };
+    const iconWrap = document.createElement('span');
+    iconWrap.className = 'camera-city-climate-icon';
+    iconWrap.innerHTML = getWeatherSvg(info.icon, current.is_day === undefined ? 1 : current.is_day);
+    details.appendChild(iconWrap);
+
+    const condition = document.createElement('span');
+    condition.className = 'camera-city-climate-condition';
+    condition.textContent = conditionText(code);
+    details.appendChild(condition);
+
+    body.appendChild(details);
+
+    const metrics = document.createElement('dl');
+    metrics.className = 'camera-city-climate-metrics';
+
+    // Reuses the dashboard's own metric labels and formatters, so a number here
+    // reads exactly as it does on the full forecast card.
+    appendClimateMetric(metrics, t('hero.feelsLike', null, 'Feels like'), formatTemp(current.apparent_temperature) + getTempUnitSymbol());
+    appendClimateMetric(metrics, t('metrics.wind', null, 'Wind'), formatWindSpeed(current.wind_speed_10m) + ' ' + getWindUnitSymbol());
+    appendClimateMetric(metrics, t('metrics.humidity', null, 'Humidity'), current.relative_humidity_2m === undefined || current.relative_humidity_2m === null
+      ? '--'
+      : `${Math.round(current.relative_humidity_2m)}%`);
+
+    body.appendChild(metrics);
+  }
+
+  function appendClimateMetric(list, label, value) {
+    const term = document.createElement('dt');
+    term.textContent = label;
+    const detail = document.createElement('dd');
+    detail.textContent = value;
+    list.appendChild(term);
+    list.appendChild(detail);
+  }
+
+  /**
+   * An app city object for a catalogue entry.
+   *
+   * The bundled benchmark list first: it is free, it is unambiguous, and five of
+   * the covered cities are in it. Geocoding only for the rest, and then only
+   * preferring a result in the registry's own country - `Windsor` and `Niagara
+   * Falls` both exist twice, and the wrong one would put the climate strip in a
+   * different country from the cameras above it.
+   */
+  async function resolveCameraRegionCity(entry) {
+    if (!entry) return null;
+    const wanted = String(entry.name || '').trim().toLowerCase();
+    if (!wanted) return null;
+
+    const known = WORLD_CITIES.find((city) => city.name.toLowerCase() === wanted);
+    if (known) return known;
+
+    let results;
+    try {
+      results = await searchCities(entry.name);
+    } catch (err) {
+      return null;
+    }
+    if (!Array.isArray(results) || !results.length) return null;
+
+    const country = String(entry.country || '').toUpperCase();
+    const match = results.find((r) => country && String(r.country_code || '').toUpperCase() === country)
+      || results[0];
+    if (!match || match.latitude === undefined || match.longitude === undefined) return null;
+
+    return {
+      id: cityIdOf({ name: match.name || entry.name, country: match.country || '', latitude: match.latitude, longitude: match.longitude }),
+      name: match.name || entry.name,
+      admin1: match.admin1 || '',
+      country: match.country || '',
+      latitude: match.latitude,
+      longitude: match.longitude,
+      timezone: match.timezone || 'auto',
+    };
+  }
+
+  /**
+   * Hand the visitor from the camera wall to the full forecast for that city.
+   *
+   * The ordinary city pipeline, so the destination is the same page a search
+   * would have produced - glance card, assistant, hourly, seven-day - with the
+   * camera panel already wired into the glance card for the same city.
+   */
+  async function openCameraCityForecast() {
+    const entry = cameraState.openCameraCity;
+    if (!entry) return;
+    const city = await resolveCameraRegionCity(entry);
+    if (!city) {
+      if (elements.cameraCityEmpty) {
+        elements.cameraCityEmpty.textContent = t(
+          'cameraHub.noForecast',
+          { city: entry.name },
+          `No forecast could be resolved for ${entry.name}.`
+        );
+        elements.cameraCityEmpty.hidden = false;
+      }
+      return;
+    }
+    setMode('city');
+    loadCityWeather(city);
+  }
+
+  // ==========================================================================
   // Adaptive Result Sorting
   // --------------------------------------------------------------------------
   // The sort dropdown mirrors the active climate filter instead of offering a
@@ -4237,8 +5084,9 @@ ${CAMERA_PANEL_HTML}
     }
 
     // Respect the mode actually on screen: a climate search that lands after
-    // the visitor moved to Compare must not push its results over it.
-    if (state.searchMode !== 'compare') {
+    // the visitor moved to Compare or Live Cameras must not push its results
+    // over it.
+    if (state.searchMode === 'climate') {
       elements.climateResultsSection.classList.remove('hidden');
     }
   }
@@ -5233,9 +6081,9 @@ const icon = document.createElement('span');
     elements.errorTitle.textContent = title;
     elements.errorMessage.textContent = message;
     // The full-screen error belongs to the dashboard and the climate filter.
-    // In compare mode a failed city load reports itself inside its own column,
-    // so the comparison surface must stay untouched.
-    if (state.searchMode !== 'compare') elements.errorState.classList.remove('hidden');
+    // In a mode that owns the main area a failed load reports itself inside
+    // that surface, so the surface must stay untouched.
+    if (!modeOwnsMainArea(state.searchMode)) elements.errorState.classList.remove('hidden');
   }
 
   // ==========================================================================
@@ -5503,17 +6351,29 @@ const icon = document.createElement('span');
   // ==========================================================================
   // Mode Switching
   // ==========================================================================
-  /** The three modes, in tab order, with the search placeholder each owns. */
+  /** The four modes, in tab order, with the search placeholder each owns. */
   const MODES = [
     { mode: 'city', placeholderKey: 'search.placeholderCity', placeholder: 'Search for a city (e.g. Paris, Tokyo, New York)...' },
     { mode: 'compare', placeholderKey: 'search.placeholderCompare', placeholder: 'Add a location to compare (e.g. Athens, Oslo, Cairo)...' },
     { mode: 'climate', placeholderKey: 'search.placeholderClimate', placeholder: 'Search climate: e.g. Sunny, Warm, Rain, Snow, > 25°C, Cold < 10°C...' },
+    { mode: 'cameras', placeholderKey: 'search.placeholderCameras', placeholder: 'Jump to a camera city: e.g. London, Seattle, Toronto, Austin...' },
   ];
 
   function modeTab(mode) {
     if (mode === 'city') return elements.tabModeCity;
     if (mode === 'compare') return elements.tabModeCompare;
+    if (mode === 'cameras') return elements.tabModeCameras;
     return elements.tabModeClimate;
+  }
+
+  /**
+   * Modes that own the whole main area rather than sharing it with the
+   * dashboard. Compare has its own surface and Live Cameras has its own, so in
+   * both the dashboard stays down: a city that finished loading in the background
+   * must not push itself over whichever surface the visitor is actually reading.
+   */
+  function modeOwnsMainArea(mode) {
+    return mode === 'compare' || mode === 'cameras';
   }
 
   /**
@@ -5528,6 +6388,7 @@ const icon = document.createElement('span');
    */
   function setMode(mode) {
     state.searchMode = mode;
+    if (mode !== 'cameras' && cameraState.openCameraCity) closeCameraCitySurface();
 
     MODES.forEach(({ mode: id }) => {
       const tab = modeTab(id);
@@ -5542,14 +6403,36 @@ const icon = document.createElement('span');
 
     const activeMode = MODES.find((entry) => entry.mode === mode) || MODES[0];
     elements.searchInput.placeholder = t(activeMode.placeholderKey, null, activeMode.placeholder);
+    if (mode === 'cameras') {
+      elements.searchInput.value = cameraState.cameraFilterQuery || '';
+      if (elements.cameraFilterInput) elements.cameraFilterInput.value = cameraState.cameraFilterQuery || '';
+    }
     elements.quickCitiesContainer.classList.toggle('hidden', mode === 'climate');
     elements.climateChipsContainer.classList.toggle('hidden', mode !== 'climate');
 
-    // Compare mode has its own surface; City/Climate own the dashboard.
-    elements.dashboard.classList.toggle('hidden', mode === 'compare');
+    // Compare and Live Cameras each have their own surface; City/Climate own the
+    // dashboard.
+    elements.dashboard.classList.toggle('hidden', modeOwnsMainArea(mode));
     elements.errorState.classList.add('hidden');
     if (elements.compareSection) {
       elements.compareSection.classList.toggle('hidden', mode !== 'compare');
+    }
+    if (elements.cameraBrowserSection) {
+      elements.cameraBrowserSection.classList.toggle('hidden', mode !== 'cameras');
+    }
+
+    // The climate results grid belongs to Climate Filter and to nothing else.
+    // It is a sibling of the dashboard rather than a part of it, so leaving its
+    // visibility to the individual search paths is what let a finished climate
+    // search stay on screen after the visitor moved to City Search or Compare -
+    // a card that belonged to a mode they were no longer in. One owner, here.
+    if (elements.climateResultsSection) {
+      elements.climateResultsSection.classList.toggle('hidden', mode !== 'climate');
+    }
+    // Its "back to results" bar is the other half of the same surface: it is
+    // meaningless anywhere the results themselves are not shown.
+    if (elements.backToResultsBar) {
+      elements.backToResultsBar.classList.toggle('hidden', mode !== 'climate');
     }
 
     if (mode === 'climate') {
@@ -5558,6 +6441,7 @@ const icon = document.createElement('span');
     }
 
     if (mode === 'compare') renderCompareSection();
+    if (mode === 'cameras') renderCameraCatalogue();
 
     // A pending re-pick is meaningless once the picker is off screen.
     if (mode !== 'compare') state.compareReplaceIndex = null;
@@ -5582,6 +6466,9 @@ const icon = document.createElement('span');
     elements.tabModeClimate.addEventListener('click', () => setMode('climate'));
     if (elements.tabModeCompare) {
       elements.tabModeCompare.addEventListener('click', () => setMode('compare'));
+    }
+    if (elements.tabModeCameras) {
+      elements.tabModeCameras.addEventListener('click', () => setMode('cameras'));
     }
 
     // `setMode` gives only the active tab a tab stop, so the tablist needs its
@@ -5617,8 +6504,10 @@ const icon = document.createElement('span');
     elements.searchForm.addEventListener('submit', (e) => {
       e.preventDefault();
 
-      // If a suggestion is highlighted, Enter commits that suggestion
-      if (state.searchMode !== 'climate' && commitActiveOption()) return;
+      // If a suggestion is highlighted, Enter commits that suggestion. Climate and
+      // Live Cameras have no geocoder suggestions to commit - both build their
+      // own list - so Enter goes to their handler instead.
+      if (state.searchMode !== 'climate' && state.searchMode !== 'cameras' && commitActiveOption()) return;
 
       closeAutocomplete();
       const query = elements.searchInput.value.trim();
@@ -5628,6 +6517,8 @@ const icon = document.createElement('span');
         handleClimateSearch(query);
       } else if (state.searchMode === 'compare') {
         handleCompareSearch(query);
+      } else if (state.searchMode === 'cameras') {
+        handleCameraCitySearch(query);
       } else {
         handleCitySearch(query);
       }
@@ -5685,6 +6576,17 @@ const icon = document.createElement('span');
       elements.searchInput.removeAttribute('aria-activedescendant');
 
       clearTimeout(state.debounceTimer);
+
+      if (state.searchMode === 'cameras') {
+        // In camera mode the shared search box drives the catalogue: it filters
+        // the covered cities and Enter jumps to the best match. The geocoder is
+        // deliberately not consulted - it would happily answer "Paris", which
+        // has no camera at all, and take the visitor somewhere this mode
+        // cannot help.
+        closeAutocomplete();
+        setCameraFilterQuery(val);
+        return;
+      }
 
       if (state.searchMode === 'climate') {
         // In climate mode, offer a single "run this query" affordance
@@ -5763,7 +6665,8 @@ const icon = document.createElement('span');
       // Compare mode keeps the same chips visible, and picking one there fills
       // a slot instead of replacing the dashboard - so the mode is read, not
       // forced back to City Search.
-      const toCompare = state.searchMode === 'compare';
+const toCompare = state.searchMode === 'compare';
+      const toCameras = state.searchMode === 'cameras';
 
       // Resolve against the local benchmark database first. Names like "Paris",
       // "Sydney" or "Rome" match several places worldwide, and going through
@@ -5778,6 +6681,8 @@ const icon = document.createElement('span');
         if (toCompare) {
           addCompareLocation(known);
           setCompareNotice('');
+        } else if (toCameras) {
+          openCameraCityFromName(known.name);
         } else {
           setMode('city');
           loadCityWeather(known);
@@ -5786,6 +6691,7 @@ const icon = document.createElement('span');
       }
 
       if (toCompare) handleCompareSearch(chip.dataset.city);
+      else if (toCameras) handleCameraCitySearch(chip.dataset.city);
       else handleCitySearch(chip.dataset.city);
     });
 
@@ -5834,6 +6740,30 @@ const icon = document.createElement('span');
         setCamerasEnabled(!camerasEnabled());
       });
       syncCameraToggle();
+    }
+
+    // --- The camera browser ---
+    // Its own filter field, the shared search box above it and the two buttons
+    // in the city surface are all wired here. The catalogue is built by
+    // delegation rather than per-tile listeners because the tiles are rebuilt on
+    // every keystroke of the filter and a re-bound handler per tile is the
+    // difference between a filter and a leak.
+    if (elements.cameraFilterInput) {
+      elements.cameraFilterInput.addEventListener('input', (e) => {
+        setCameraFilterQuery(e.target.value);
+      });
+    }
+    if (elements.cameraBackAllBtn) {
+      elements.cameraBackAllBtn.addEventListener('click', () => {
+        closeCameraCitySurface();
+        if (elements.cameraCatalogueCard) elements.cameraCatalogueCard.scrollIntoView({ block: 'start' });
+        if (elements.cameraFilterInput) elements.cameraFilterInput.focus();
+      });
+    }
+    if (elements.cameraOpenForecastBtn) {
+      elements.cameraOpenForecastBtn.addEventListener('click', () => {
+        openCameraCityForecast();
+      });
     }
 
     // Back to Climate Results button
@@ -5945,6 +6875,9 @@ const icon = document.createElement('span');
       // The comparison borrows the same unit-aware formatters, so a repaint is
       // all it needs - no refetch.
       if (isCompareVisible()) renderCompareSection();
+      if (cameraState.openCameraCity && cameraState.openCameraWeather) {
+        paintCameraCityClimate(cameraState.openCameraCity, cameraState.openCameraWeather);
+      }
     }
 
     elements.unitC.addEventListener('click', () => setUnit('celsius'));
@@ -6074,6 +7007,18 @@ const icon = document.createElement('span');
         // the "no camera" line) are all language-bound, and the results render
         // above already repaints each panel from its cached answer.
         syncCameraToggle();
+        // The camera browser is built from the same strings, so it is repainted
+        // from its cached catalogue rather than refetched.
+        if (cameraState.catalogue && cameraState.catalogue.length && state.searchMode === 'cameras') {
+          if (cameraState.openCameraCity) {
+            paintCameraWall(cameraState.openCameraWall, cameraState.openCameraCity);
+            if (cameraState.openCameraWeather) {
+              paintCameraCityClimate(cameraState.openCameraCity, cameraState.openCameraWeather);
+            }
+          } else {
+            paintCameraCatalogue(cameraState.catalogue);
+          }
+        }
       });
     }
 

@@ -99,6 +99,20 @@
             </svg>
             <span data-i18n="nav.climateFilter">Climate Filter</span>
           </button>
+          <!-- Fourth mode: browse the free public cameras themselves.
+               It exists because coverage is regional - most cities genuinely have
+               none - so without a way to *find* the ones that do, the feature
+               reads as broken rather than as an honest answer. Opening a city
+               here shows its live frames and its climate side by side, and hands
+               the visitor on to the full forecast. -->
+          <button type="button" class="mode-tab" id="tab-mode-cameras" role="tab" aria-selected="false" aria-controls="main-content">
+            <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path d="M2.5 6.5h10v7h-10z" />
+              <path d="M12.5 10l5-2.5v5l-5-2.5z" />
+              <circle cx="7.5" cy="10" r="1.6" />
+            </svg>
+            <span data-i18n="nav.cameras">Live Cameras</span>
+          </button>
         </div>
 
         <form id="search-form" class="search-form" role="search" autocomplete="off">
@@ -420,6 +434,98 @@
             <table class="compare-table" id="compare-forecast-table"></table>
           </div>
         </section>
+      </section>
+
+      <!-- Live Cameras Mode (browse the free public cameras themselves).
+           Two surfaces in one section, exactly like the compare section: the
+           catalogue of every covered city, and the live wall of one chosen city.
+           Both are built from the directory's own coverage index, so the list of
+           places that have cameras costs one request and no camera downloads. -->
+      <section id="camera-browser-section" class="camera-browser hidden" aria-labelledby="camera-browser-heading">
+        <!-- 1. The catalogue: every city with a free public camera, grouped by
+             the source that publishes it. Grouping is deliberate - coverage is
+             regional, and a visitor should be able to see that before clicking,
+             rather than concluding the feature is broken when their own city is
+             not on the list. -->
+        <div class="card camera-catalogue-card">
+          <div class="compare-title-row">
+            <h2 class="card-section-title" id="camera-browser-heading" data-i18n="cameraHub.heading">Cities Live Web Cameras</h2>
+            <span class="count-badge" id="camera-catalogue-count" data-i18n="cameraHub.total" data-i18n-vars='{"count":0,"sources":0}'>0 cities</span>
+          </div>
+          <p class="card-subtitle" id="camera-catalogue-subtitle" data-i18n="cameraHub.subtitle">
+            Free public cameras, grouped by the authority that publishes them. Open a city to watch it live.
+          </p>
+
+          <!-- Catalogue filter. Its own input rather than the shared search box:
+               the search box above is what picks a city, and borrowing it here
+               would leave a camera browse fighting a forecast search. -->
+          <div class="camera-catalogue-filter">
+            <label class="sort-label" for="camera-city-filter" data-i18n="cameraHub.filterLabel">Filter camera cities</label>
+            <input
+              type="search"
+              id="camera-city-filter"
+              class="camera-filter-input"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="London, Seattle, Toronto..."
+              data-i18n-placeholder="cameraHub.filterPlaceholder"
+            />
+          </div>
+
+          <div id="camera-catalogue-loading" class="camera-catalogue-status" role="status" aria-live="polite" hidden>
+            <div class="spinner"></div>
+            <p class="state-text" data-i18n="cameraHub.loading">Finding every city with a free public camera...</p>
+          </div>
+          <p id="camera-catalogue-error" class="camera-catalogue-status camera-catalogue-error" role="alert" hidden></p>
+          <p id="camera-catalogue-empty" class="camera-catalogue-status camera-catalogue-empty" hidden></p>
+
+          <div class="camera-catalogue-groups" id="camera-catalogue-groups" role="list" aria-label="Cities with live cameras" data-i18n-aria-label="cameraHub.catalogueAria"></div>
+        </div>
+
+        <!-- 2. One chosen city: its live frames, and the climate right beside
+             them. The two are shown together on purpose - a camera tells you
+             what the sky is doing, the forecast tells you what it will do, and
+             the pair is the argument for the whole feature. -->
+        <div class="card camera-city-card" id="camera-city-card" hidden>
+          <div class="camera-city-head">
+            <button type="button" class="btn btn-back" id="camera-back-all-btn">
+              <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fill-rule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 111-1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.08L5.612 9.25H16.25A.75.75 0 0117 10z" clip-rule="evenodd" />
+              </svg>
+              <span data-i18n="cameraHub.backAll">All camera cities</span>
+            </button>
+            <div class="camera-city-title">
+              <h2 class="card-section-title" id="camera-city-name"></h2>
+              <p class="camera-city-meta">
+                <span id="camera-city-count"></span>
+                <span class="camera-city-source" id="camera-city-source"></span>
+              </p>
+            </div>
+            <!-- The jump into the full forecast. The camera section answers
+                 "what is it doing right now"; this hands the visitor on to the
+                 seven-day outlook for the same place. -->
+            <button type="button" class="btn btn-search" id="camera-open-forecast-btn" data-i18n="cameraHub.openForecast">Open full forecast</button>
+          </div>
+
+          <div id="camera-city-loading" class="camera-catalogue-status" role="status" aria-live="polite" hidden>
+            <div class="spinner"></div>
+            <p class="state-text" data-i18n="cameraHub.loadingCity">Opening the cameras...</p>
+          </div>
+
+          <!-- The wall. A plain <img> per frame on purpose: the directory serves
+               each frame with the source's own refresh cadence in Cache-Control,
+               so the browser keeps them live by itself and the app runs no
+               polling loop at all. -->
+          <div class="camera-wall" id="camera-wall" role="list" aria-label="Live cameras in the chosen city" data-i18n-aria-label="cameraHub.wallAria"></div>
+          <p id="camera-city-empty" class="camera-catalogue-status camera-catalogue-empty" hidden></p>
+
+          <!-- The city climate card, beside the frames rather than behind a
+               second click. -->
+          <section class="camera-city-climate" id="camera-city-climate" aria-labelledby="camera-city-climate-heading">
+            <h3 class="camera-city-climate-heading" id="camera-city-climate-heading" data-i18n="cameraHub.climateHeading">Today's climate</h3>
+            <div class="camera-city-climate-body" id="camera-city-climate-body"></div>
+          </section>
+        </div>
       </section>
 
       <!-- Full Weather Dashboard (Populated dynamically) -->
