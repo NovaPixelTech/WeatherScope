@@ -541,6 +541,10 @@
    * Register the persistent "your local time" clock in the header. It always
    * reads USER_TIME_ZONE, so it is registered exactly once at boot.
    */
+/**
+   * Register the persistent "your local time" clock in the header. It always
+   * reads USER_TIME_ZONE, so it is registered exactly once at boot.
+   */
   function registerUserClock() {
     if (userClockId !== null) return;
 
@@ -817,6 +821,9 @@
     userClockTime: document.getElementById('user-clock-time'),
     userClockZone: document.getElementById('user-clock-zone'),
     userClock: document.getElementById('user-clock'),
+    userLocationIp: document.getElementById('user-location-ip'),
+    userLocationPlace: document.getElementById('user-location-place'),
+    userLocation: document.getElementById('user-location'),
     footerUserZone: document.getElementById('footer-user-zone'),
     footerTimezoneNote: document.getElementById('footer-timezone-note'),
     hourlyTzLabel: document.getElementById('hourly-tz-label'),
@@ -4840,6 +4847,29 @@ const icon = document.createElement('span');
     if (detected.source === 'query' || detected.source === 'stored') return;
     if (languagePicked) return;
     window.I18n.setLanguage(detected.lang, { persist: false });
+
+    // Update the user location display with the geo info
+    updateUserLocationDisplay(detected);
+  }
+
+  function updateUserLocationDisplay(geoInfo) {
+    if (!geoInfo || !elements.userLocation || !elements.userLocationIp || !elements.userLocationPlace) return;
+    const { ip, city, country } = geoInfo;
+    if (ip) {
+      elements.userLocationIp.textContent = ip;
+      let placeText = '';
+      if (country && city) {
+        placeText = t('nav.countryCity', { country, city }, `${country}, ${city}`);
+      } else if (country) {
+        placeText = country;
+      } else if (city) {
+        placeText = city;
+      } else {
+        placeText = t('nav.detectedLocation', null, 'Detected location');
+      }
+      elements.userLocationPlace.textContent = placeText;
+      elements.userLocation.hidden = false;
+    }
   }
 
   function syncLanguageButtons() {

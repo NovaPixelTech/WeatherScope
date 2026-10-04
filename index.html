@@ -140,7 +140,7 @@
         <div id="autocomplete-list" class="autocomplete-dropdown hidden" role="listbox" aria-label="Search suggestions" data-i18n-aria-label="search.suggestionsAria"></div>
       </div>
 
-      <div class="header-controls">
+<div class="header-controls">
         <!-- Visitor reference clock: the "your side" of every time difference shown below -->
         <div class="user-clock" id="user-clock">
           <svg class="user-clock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -152,6 +152,18 @@
                  the non-volatile zone name below carries the accessible meaning. -->
             <span class="user-clock-time" id="user-clock-time" aria-hidden="true">--:--:--</span>
             <span class="user-clock-zone" id="user-clock-zone" data-i18n="nav.yourTime">Your time</span>
+          </span>
+        </div>
+
+        <!-- Visitor IP & location (auto-detected for language selection) -->
+        <div class="user-location" id="user-location" hidden>
+          <svg class="user-location-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+          </svg>
+          <span class="user-location-body">
+            <span class="user-location-ip" id="user-location-ip" aria-hidden="true">--</span>
+            <span class="user-location-place" id="user-location-place" data-i18n="nav.detectedLocation">Detected location</span>
           </span>
         </div>
 

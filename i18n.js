@@ -311,6 +311,11 @@
       'time.youClock': 'You {time}',
       'time.yourZoneTitle': 'Your timezone: {zone}',
       'time.allTimesIn': 'All times in {zone}',
+
+      // --- Visitor IP location ------------------------------------------------
+      'nav.detectedLocation': 'Detected location',
+      'nav.yourIP': 'Your IP',
+      'nav.countryCity': '{country}, {city}',
       'time.offsetVsYou': 'Offset vs you ({zone}): {value}',
       'time.freshnessNow': 'Updated just now',
       'time.freshnessMinutes': 'Updated {count} min ago',
@@ -753,6 +758,11 @@
       'time.youClock': 'Εσείς {time}',
       'time.yourZoneTitle': 'Η ζώνη ώρας σας: {zone}',
       'time.allTimesIn': 'Όλες οι ώρες στη ζώνη {zone}',
+
+      // --- Visitor IP location ------------------------------------------------
+      'nav.detectedLocation': 'Εντοπισμένη θέση',
+      'nav.yourIP': 'Το IP σας',
+      'nav.countryCity': '{country}, {city}',
       'time.offsetVsYou': 'Διαφορά από εσάς ({zone}): {value}',
       'time.freshnessNow': 'Ενημερώθηκε μόλις τώρα',
       'time.freshnessMinutes': 'Ενημερώθηκε πριν {count} λεπτά',
@@ -1195,6 +1205,11 @@
       'time.youClock': 'Sie {time}',
       'time.yourZoneTitle': 'Ihre Zeitzone: {zone}',
       'time.allTimesIn': 'Alle Zeiten in {zone}',
+
+      // --- Visitor IP location ------------------------------------------------
+      'nav.detectedLocation': 'Erkannter Standort',
+      'nav.yourIP': 'Ihre IP',
+      'nav.countryCity': '{country}, {city}',
       'time.offsetVsYou': 'Unterschied zu Ihnen ({zone}): {value}',
       'time.freshnessNow': 'Gerade eben aktualisiert',
       'time.freshnessMinutes': 'Vor {count} Min. aktualisiert',
@@ -1707,41 +1722,47 @@
     {
       url: 'https://www.cloudflare.com/cdn-cgi/trace',
       parse: (body) => {
-        const match = /(?:^|\r?\n)loc\s*=\s*([A-Za-z]{2})(?:\r?\n|$)/i.exec(body);
-        return match ? match[1].toUpperCase() : null;
+        const locMatch = /(?:^|\r?\n)loc\s*=\s*([A-Za-z]{2})(?:\r?\n|$)/i.exec(body);
+        const ipMatch = /(?:^|\r?\n)ip\s*=\s*([0-9a-fA-F:.]+)(?:\r?\n|$)/i.exec(body);
+        const country = locMatch ? locMatch[1].toUpperCase() : null;
+        const ip = ipMatch ? ipMatch[1] : null;
+        return { country, ip, city: null };
       },
     },
     {
       url: 'https://ipwho.is/',
       parse: (body) => {
         const data = JSON.parse(body);
-        return data && data.success !== false ? data.country_code : null;
+        if (data && data.success !== false) {
+          return { country: data.country_code, ip: data.ip, city: data.city };
+        }
+        return { country: null, ip: null, city: null };
       },
     },
     {
       url: 'https://api.country.is/',
       parse: (body) => {
         const data = JSON.parse(body);
-        return data ? data.country : null;
+        return { country: data ? data.country : null, ip: null, city: null };
       },
     },
     {
       url: 'https://get.geojs.io/v1/ip/country.json',
       parse: (body) => {
         const data = JSON.parse(body);
-        return data ? data.country : null;
+        return { country: data ? data.country : null, ip: null, city: null };
       },
     },
     {
       url: 'https://ipinfo.io/json',
       parse: (body) => {
         const data = JSON.parse(body);
-        return data && data.country ? data.country : null;
+        return { country: data && data.country ? data.country : null, ip: data.ip, city: data.city };
       },
     },
   ];
 
-  function fetchCountry(endpoint) {
+  function fetchGeoInfo(endpoint) {
     const fetchImpl = win && typeof win.fetch === 'function'
       ? win.fetch.bind(win)
       : (typeof fetch === 'function' ? fetch : null);
@@ -1765,9 +1786,9 @@
         return response.text();
       })
       .then((body) => {
-        const code = endpoint.parse(body);
-        if (!code) throw new Error('geo response unparseable');
-        return langForCountry(code);
+        const result = endpoint.parse(body);
+        if (!result || !result.country) throw new Error('geo response unparseable');
+        return result;
       });
 
     if (!hasAbortController) {
@@ -1798,13 +1819,13 @@
    */
   function detectLanguage() {
     const query = langFromQuery();
-    if (query) return Promise.resolve({ lang: query, source: 'query' });
+    if (query) return Promise.resolve({ lang: query, source: 'query', ip: null, city: null, country: null });
 
     const stored = readStorage();
-    if (stored) return Promise.resolve({ lang: stored, source: 'stored' });
+    if (stored) return Promise.resolve({ lang: stored, source: 'stored', ip: null, city: null, country: null });
 
     return raceIpLanguage()
-      .then((lang) => (lang ? { lang, source: 'ip' } : fallbackLang()))
+      .then((info) => ({ ...info, source: 'ip' }))
       .catch(() => fallbackLang());
   }
 
@@ -1815,11 +1836,13 @@
    * endpoint can never leave an unhandled rejection behind - which would have
    * logged a scary error on every page load for anyone whose fourth provider
    * is rate-limiting.
+   * Returns { lang, ip, city, country } or throws.
    */
   function raceIpLanguage() {
-    const attempts = GEO_ENDPOINTS.map((endpoint) => fetchCountry(endpoint).then((lang) => {
+    const attempts = GEO_ENDPOINTS.map((endpoint) => fetchGeoInfo(endpoint).then((info) => {
+      const lang = langForCountry(info.country);
       if (!lang) throw new Error('geo language unavailable');
-      return lang;
+      return { lang, ip: info.ip, city: info.city, country: info.country };
     }));
 
     if (typeof Promise.any === 'function') return Promise.any(attempts);
@@ -1839,10 +1862,10 @@
   /** When no IP answer arrives: browser language, then timezone, then English. */
   function fallbackLang() {
     const browser = detectBrowserLang();
-    if (browser) return { lang: browser, source: 'browser' };
+    if (browser) return { lang: browser, source: 'browser', ip: null, city: null, country: null };
     const zone = detectTimeZoneLang();
-    if (zone) return { lang: zone, source: 'timezone' };
-    return { lang: DEFAULT_LANG, source: 'default' };
+    if (zone) return { lang: zone, source: 'timezone', ip: null, city: null, country: null };
+    return { lang: DEFAULT_LANG, source: 'default', ip: null, city: null, country: null };
   }
 
   // ==========================================================================

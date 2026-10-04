@@ -1255,7 +1255,8 @@ body {
 }
 
 /* --- Header: the visitor's own clock ----------------------------------- */
-.user-clock {
+.user-clock,
+.user-location {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1264,6 +1265,38 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: var(--radius-full);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.user-location-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--accent-yellow);
+  flex-shrink: 0;
+}
+
+.user-location-body {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.user-location-ip {
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #ffffff;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+}
+
+.user-location-place {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 18ch;
 }
 
 .user-clock-icon {
@@ -3288,11 +3321,13 @@ body {
 
   /* The header clock and the unit toggle share one row; let the clock shrink
      before the toggle is pushed off-screen. */
-  .user-clock {
+  .user-clock,
+  .user-location {
     min-width: 0;
   }
 
-  .user-clock-zone {
+  .user-clock-zone,
+  .user-location-place {
     max-width: 10ch;
   }
 }
@@ -3307,20 +3342,24 @@ body {
     justify-content: flex-end;
   }
 
-  .user-clock {
+  .user-clock,
+  .user-location {
     padding: 4px 10px 4px 8px;
     gap: 6px;
   }
 
-  .user-clock-icon {
+  .user-clock-icon,
+  .user-location-icon {
     display: none;
   }
 
-  .user-clock-time {
+  .user-clock-time,
+  .user-location-ip {
     font-size: 0.84rem;
   }
 
-  .user-clock-zone {
+  .user-clock-zone,
+  .user-location-place {
     max-width: 12ch;
   }
 
