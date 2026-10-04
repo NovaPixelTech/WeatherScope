@@ -63,6 +63,8 @@
    * An unmapped country resolves to the English default.
    */
   const COUNTRY_LANGS = {
+    // English-speaking countries (and the English default elsewhere)
+    US: 'en', GB: 'en', UK: 'en', IE: 'en', CA: 'en', AU: 'en', NZ: 'en',
     // Greek
     GR: 'el', CY: 'el',
     // German-speaking countries and regions
@@ -88,8 +90,9 @@
     'SWITZERLAND': 'de', 'SCHWEIZ': 'de',
     'LIECHTENSTEIN': 'de',
     'LUXEMBOURG': 'de',
-    // Greek
-    'GREECE': 'el', 'ΕΛΛΑΔΑ': 'el', 'ELLADA': 'el',
+    // Greek. `ΕΛΛΑΣ` is the modern Greek name and is absent
+    // from CLDR, so it is the one Greek form that has to be written out.
+    'GREECE': 'el', 'ΕΛΛΑΔΑ': 'el', 'ΕΛΛΑΣ': 'el', 'ELLADA': 'el',
     'CYPRUS': 'el', 'ΚΥΠΡΟΣ': 'el', 'KYPROS': 'el',
     // Italian
     'ITALY': 'it', 'ITALIA': 'it',
@@ -141,12 +144,22 @@
     'CHAD': 'fr', 'TCHAD': 'fr',
     'CENTRAL AFRICAN REPUBLIC': 'fr', 'CAR': 'fr',
     'CENTRAL AFRICAN REP': 'fr',
+    // Localized names are NOT listed here. A name written in one language can
+    // name a country whose visitors read another ("Frankreich" is German for
+    // France, so it has to resolve to French), and a hand-written row per
+    // language per country is exactly the kind of table that goes quietly
+    // wrong. `countryNameIndex` below derives them from COUNTRY_LANGS instead,
+    // so a name can never disagree with the code it stands for.
+    'UNITED STATES': 'en', 'USA': 'en', 'UNITED STATES OF AMERICA': 'en',
+    'UNITED KINGDOM': 'en', 'UK': 'en', 'GREAT BRITAIN': 'en', 'BRITAIN': 'en',
+    'CANADA': 'en', 'AUSTRALIA': 'en', 'NEW ZEALAND': 'en', 'IRELAND': 'en',
   };
 
   /** Retained timezone hints for consumers; IP-based startup does not use them. */
   const ZONE_LANGS = [
     { match: /^(Europe|Athens|_)/, test: /Athens/i, lang: 'el' },
   ];
+
 
   // ==========================================================================
   // Dictionary
@@ -227,6 +240,18 @@
       'climate.sortHighToLow': '{label} (higher to lower)',
       'climate.sortLowToHigh': '{label} (lower to higher)',
       'climate.emptyTitle': 'No cities in the {count}-city benchmark dataset currently match this exact climate criteria.',
+      'camera.toggleOn': 'Live cameras on',
+      'camera.toggleOff': 'Live cameras off',
+      'camera.none': 'No free public camera for this city',
+      'camera.live': 'Live',
+      'camera.pause': 'Pause',
+      'camera.play': 'Play',
+      'camera.alt': 'Live camera view: {place}',
+      'camera.altGeneric': 'Live camera view',
+      'camera.distanceOne': '{distance} km away',
+      'camera.distanceMany': '{distance} km away',
+      'camera.attribution': 'Camera: {source}',
+      'camera.offline': 'Camera unavailable',
       'climate.emptyHint': 'Try a broader condition like "Sunny", "Warm", or "Cloudy".',
       'climate.viewDetails': 'View Weather Details',
       'climate.cardHumidityTitle': 'Relative Humidity',
@@ -674,6 +699,18 @@
       'climate.sortHighToLow': '{label} (υψηλότερη προς χαμηλότερη)',
       'climate.sortLowToHigh': '{label} (χαμηλότερη προς υψηλότερη)',
       'climate.emptyTitle': 'Καμία από τις {count} πόλεις αναφοράς δεν ταιριάζει αυτή τη στιγμή με αυτά τα ακριβή κλιματικά κριτήρια.',
+      'camera.toggleOn': 'Ζωντανές κάμερες ενεργές',
+      'camera.toggleOff': 'Ζωντανές κάμερες εκτός',
+      'camera.none': 'Δεν υπάρχει δωρεάν δημόσια κάμερα για αυτή την πόλη',
+      'camera.live': 'Ζωντανά',
+      'camera.pause': 'Παύση',
+      'camera.play': 'Αναπαραγωγή',
+      'camera.alt': 'Ζωντανή εικόνα από κάμερα: {place}',
+      'camera.altGeneric': 'Ζωντανή εικόνα από κάμερα',
+      'camera.distanceOne': '{distance} χλμ. μακριά',
+      'camera.distanceMany': '{distance} χλμ. μακριά',
+      'camera.attribution': 'Κάμερα: {source}',
+      'camera.offline': 'Η κάμερα δεν είναι διαθέσιμη',
       'climate.emptyHint': 'Δοκιμάστε μια ευρύτερη συνθήκη, όπως "Ηλιόλουστο", "Ζεστό" ή "Συννεφιά".',
       'climate.viewDetails': 'Δείτε αναλυτικά τον καιρό',
       'climate.cardHumidityTitle': 'Σχετική υγρασία',
@@ -1121,6 +1158,18 @@
       'climate.sortHighToLow': '{label} (höher nach niedriger)',
       'climate.sortLowToHigh': '{label} (niedriger nach höher)',
       'climate.emptyTitle': 'Keine der {count} Referenzstädte entspricht derzeit genau diesen Klimabedingungen.',
+      'camera.toggleOn': 'Live-Kameras an',
+      'camera.toggleOff': 'Live-Kameras aus',
+      'camera.none': 'Für diese Stadt gibt es keine kostenlose öffentliche Kamera',
+      'camera.live': 'Live',
+      'camera.pause': 'Pause',
+      'camera.play': 'Abspielen',
+      'camera.alt': 'Live-Kamerabild: {place}',
+      'camera.altGeneric': 'Live-Kamerabild',
+      'camera.distanceOne': '{distance} km entfernt',
+      'camera.distanceMany': '{distance} km entfernt',
+      'camera.attribution': 'Kamera: {source}',
+      'camera.offline': 'Kamera nicht verfügbar',
       'climate.emptyHint': 'Versuchen Sie eine breitere Bedingung wie "Sonnig", "Warm" oder "Bewölkt".',
       'climate.viewDetails': 'Wetterdetails ansehen',
       'climate.cardHumidityTitle': 'Relative Luftfeuchtigkeit',
@@ -1534,6 +1583,18 @@
       'climate.sortHighToLow': '{label} (dal più alto al più basso)',
       'climate.sortLowToHigh': '{label} (dal più basso al più alto)',
       'climate.resultsSubtitle': 'Cercate {count} città di riferimento in tutto il mondo. Seleziona una città per esplorare il meteo in tempo reale e le previsioni a 7 giorni.',
+      'camera.toggleOn': 'Telecamere live attive',
+      'camera.toggleOff': 'Telecamere live spente',
+      'camera.none': 'Non esiste una webcam pubblica gratuita per questa città',
+      'camera.live': 'Live',
+      'camera.pause': 'Pausa',
+      'camera.play': 'Riproduci',
+      'camera.alt': 'Immagine dalla telecamera live: {place}',
+      'camera.altGeneric': 'Immagine dalla telecamera live',
+      'camera.distanceOne': 'A {distance} km di distanza',
+      'camera.distanceMany': 'A {distance} km di distanza',
+      'camera.attribution': 'Telecamera: {source}',
+      'camera.offline': 'Telecamera non disponibile',
       'climate.emptyTitle': 'Nessuna delle {count} città di riferimento corrisponde esattamente a questi criteri climatici.',
       'climate.emptyHint': 'Prova una condizione più ampia come "Soleggiato", "Caldo" o "Nuvoloso".',
       'climate.viewDetails': 'Vedi dettagli meteo', 'climate.cardHumidityTitle': 'Umidità relativa',
@@ -1815,6 +1876,18 @@
       'climate.sortHighToLow': '{label} (de mayor a menor)',
       'climate.sortLowToHigh': '{label} (de menor a mayor)',
       'climate.resultsSubtitle': 'Se han buscado {count} ciudades de referencia en todo el mundo. Selecciona una para explorar el tiempo en directo y la previsión de 7 días.',
+      'camera.toggleOn': 'Cámaras en directo activadas',
+      'camera.toggleOff': 'Cámaras en directo desactivadas',
+      'camera.none': 'No hay una cámara pública gratuita para esta ciudad',
+      'camera.live': 'En directo',
+      'camera.pause': 'Pausar',
+      'camera.play': 'Reproducir',
+      'camera.alt': 'Imagen de cámara en directo: {place}',
+      'camera.altGeneric': 'Imagen de cámara en directo',
+      'camera.distanceOne': 'A {distance} km de distancia',
+      'camera.distanceMany': 'A {distance} km de distancia',
+      'camera.attribution': 'Cámara: {source}',
+      'camera.offline': 'Cámara no disponible',
       'climate.emptyTitle': 'Ninguna de las {count} ciudades de referencia coincide exactamente con estos criterios climáticos.',
       'climate.emptyHint': 'Prueba una condición más general, como "Soleado", "Cálido" o "Nublado".',
       'climate.viewDetails': 'Ver detalles del tiempo', 'climate.cardHumidityTitle': 'Humedad relativa',
@@ -2076,27 +2149,119 @@
   }
 
   /**
-   * The supported language a country speaks, or null when the IP country has
-   * no opinion - the caller then falls through to the browser's preference
-   * rather than assuming English.
+   * The language an IP country speaks, or null when it has no opinion - the
+   * caller then falls through to the browser's preference rather than assuming
+   * English.
+   *
+   * The IP services in use disagree about what a "country" looks like: some
+   * answer `{"country_code":"DE"}`, some `{"country":"Germany"}`, some a
+   * description already written in the visitor's own language. So all three
+   * shapes are accepted, in order of how much they can be trusted:
+   *
+   *   1. an ISO 3166-1 alpha-2 code, which is unambiguous;
+   *   2. an exact name from the table above;
+   *   3. the same country named in any of the six embedded languages, resolved
+   *      through `countryNameIndex`;
+   *   4. a loose spelling of either - accents dropped, punctuation ignored -
+   *      for the answers that arrive as "ESPANA" or "Cote d'Ivoire".
    */
   function langForCountry(countryCode) {
     if (typeof countryCode !== 'string') return null;
-    const code = countryCode.trim().toUpperCase();
-    // Try as ISO 2-letter code
-    if (/^[A-Z]{2}$/.test(code)) {
-      return COUNTRY_LANGS[code] || null;
+    const raw = countryCode.trim();
+    if (!raw) return null;
+
+    const code = raw.toUpperCase();
+    // 1. ISO 3166-1 alpha-2. Not a plain early return: "UK" is two letters but
+    // is not an ISO code, and it does appear in the wild, so it falls through to
+    // the name lookups rather than being rejected here.
+    if (/^[A-Z]{2}$/.test(code) && COUNTRY_LANGS[code]) {
+      return COUNTRY_LANGS[code];
     }
-    // Try as full country name
-    if (COUNTRY_NAME_LANGS[code]) {
-      return COUNTRY_NAME_LANGS[code];
+
+    // 2. An exact name, with a trailing qualifier dropped first - services
+    // return "Bolivia (Plurinational State of)" as readily as "Bolivia".
+    const withoutQualifier = code.replace(/\s*\(.*\)\s*$/, '').trim();
+    if (COUNTRY_NAME_LANGS[withoutQualifier]) {
+      return COUNTRY_NAME_LANGS[withoutQualifier];
     }
-    // Also try to match by removing common suffixes/prefixes variations
-    const normalized = code.replace(/\s*\(.*\)$/, '').trim();
-    if (COUNTRY_NAME_LANGS[normalized]) {
-      return COUNTRY_NAME_LANGS[normalized];
+
+    // 3. The country named in any embedded language.
+    const localized = countryNameIndex();
+    if (localized && localized[withoutQualifier]) {
+      return localized[withoutQualifier];
+    }
+
+    // 4. Accents and punctuation cannot be the thing that decides a language.
+    const loose = looseKey(withoutQualifier);
+    if (loose) {
+      if (COUNTRY_NAME_LANGS[loose]) return COUNTRY_NAME_LANGS[loose];
+      if (localized && localized[loose]) return localized[loose];
     }
     return null;
+  }
+
+  /**
+   * Every country in `COUNTRY_LANGS`, named in each embedded language, mapped
+   * back to that country's language.
+   *
+   * Built from the same codes the ISO lookup uses and resolved through the same
+   * table, so a localized name can never resolve to a different language than
+   * the code for the same country - which is the whole failure mode of writing
+   * these by hand ("Frankreich" is German for France, so it must answer `fr`,
+   * not `de`).
+   *
+   * `Intl.DisplayNames` is present in every browser this app supports and in
+   * Node's full-icu builds; where it is missing the lookup simply falls back to
+   * the hand-written names.
+   */
+  let _countryNameIndex = null;
+  function countryNameIndex() {
+    if (_countryNameIndex) return _countryNameIndex;
+    const index = Object.create(null);
+    if (typeof Intl === 'undefined' || typeof Intl.DisplayNames !== 'function') {
+      _countryNameIndex = index;
+      return index;
+    }
+    SUPPORTED.forEach((lang) => {
+      let display;
+      try {
+        display = new Intl.DisplayNames([INTL_LOCALES[lang] || lang], { type: 'region' });
+      } catch (err) {
+        return;
+      }
+      Object.keys(COUNTRY_LANGS).forEach((iso) => {
+        let name;
+        try {
+          name = display.of(iso);
+        } catch (err) {
+          return;
+        }
+        if (typeof name !== 'string' || !name) return;
+        const key = name.toUpperCase();
+        // First language wins, so the two-language entries (Canada, Haiti) keep
+        // a stable answer rather than depending on iteration order.
+        if (!index[key]) index[key] = COUNTRY_LANGS[iso];
+        const loose = looseKey(key);
+        if (loose && !index[loose]) index[loose] = COUNTRY_LANGS[iso];
+      });
+    });
+    _countryNameIndex = index;
+    return index;
+  }
+
+  /**
+   * A spelling-insensitive key: "ESPAÑA", "Espana" and "España." all collapse to
+   * `ESPANA`, and "Côte d'Ivoire" to `COTE D IVOIRE`.
+   */
+  function looseKey(value) {
+    if (typeof value !== 'string') return '';
+    const folded = value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim();
+    return folded;
   }
 
   /** The supported language an IANA timezone suggests, or null. */

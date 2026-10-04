@@ -294,16 +294,30 @@
 
           <div class="climate-results-controls">
             <div class="climate-active-tags" id="climate-active-tags"></div>
-            <div class="climate-sort-wrapper">
-              <label for="climate-sort-select" class="sort-label" data-i18n="climate.sortLabel">Sort:</label>
-              <!-- Options are rebuilt from the active climate filter on every render:
-                   each measurement the filter constrains (temperature, humidity, wind)
-                   is offered higher-to-lower and lower-to-higher, and city name is
-                   always available. This single option is the pre-render baseline;
-                   it is always present in the generated list too. -->
-              <select id="climate-sort-select" class="climate-select">
-                <option value="name-asc" data-i18n="climate.sortNameAsc">City name (A-Z)</option>
-              </select>
+            <div class="climate-controls-row">
+              <button
+                type="button"
+                class="camera-toggle"
+                id="camera-toggle"
+                aria-pressed="true"
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M2.5 7.5h11v9h-11z" />
+                  <path d="M13.5 11l6-3.5v9l-6-3.5" />
+                </svg>
+                <span data-ref="cameraToggleLabel" data-i18n="camera.toggleOn">Live cameras on</span>
+              </button>
+              <div class="climate-sort-wrapper">
+                <label for="climate-sort-select" class="sort-label" data-i18n="climate.sortLabel">Sort:</label>
+                <!-- Options are rebuilt from the active climate filter on every render:
+                     each measurement the filter constrains (temperature, humidity, wind)
+                     is offered higher-to-lower and lower-to-higher, and city name is
+                     always available. This single option is the pre-render baseline;
+                     it is always present in the generated list too. -->
+                <select id="climate-sort-select" class="climate-select">
+                  <option value="name-asc" data-i18n="climate.sortNameAsc">City name (A-Z)</option>
+                </select>
+              </div>
             </div>
           </div>
         </div>
@@ -799,6 +813,8 @@
   <script src="glance.js"></script>
   <!-- Pure share-link logic (city + cards deep links), no DOM access -->
   <script src="share.js"></script>
+  <!-- Pure camera discovery logic (bbox query, ranking, cadence), no DOM access -->
+  <script src="cameras.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1110,6 +1110,221 @@ body {
   color: #7dd3fc;
 }
 
+/* --- Free live city camera ------------------------------------------------
+   A live frame sits inside its city's own card, above the footer: a forecast
+   row tells you what to expect, and the camera shows what is actually outside
+   right now. It is the same information in a different tense, so it belongs in
+   the same place rather than in a separate view.
+
+   The panel carries three pieces of information that must never be traded
+   away for the picture itself:
+     * a "Live" badge, so a stale frame is never mistaken for a current one;
+     * the source's own attribution, which the licence requires;
+     * a pause control, because a still frame arriving every minute is motion a
+       visitor may not want at all (WCAG 2.2.2 - moving content must be
+       pausable). The pause control is a real button with aria-pressed, so the
+       state survives being read by assistive tech.
+   A city with no public camera never renders the panel; it gets one short line
+   of text instead, from .city-camera-note. */
+
+.city-camera {
+  margin: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.city-camera[hidden] {
+  display: none;
+}
+
+.city-camera-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(6, 12, 26, 0.75);
+}
+
+.city-camera-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* A frame that never loads must not collapse the frame box and jump the
+     rest of the card down. */
+  min-height: 100%;
+}
+
+.city-camera-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(6, 12, 26, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  pointer-events: none;
+}
+
+.city-camera-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff5f5f;
+  box-shadow: 0 0 0 0 rgba(255, 95, 95, 0.7);
+  animation: camera-live-pulse 2s ease-out infinite;
+}
+
+@keyframes camera-live-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 95, 95, 0.7); }
+  70% { box-shadow: 0 0 0 6px rgba(255, 95, 95, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 95, 95, 0); }
+}
+
+.city-camera-toggle {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(6, 12, 26, 0.78);
+  color: var(--text-primary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.city-camera-toggle:hover {
+  background: rgba(18, 30, 56, 0.92);
+  border-color: rgba(255, 255, 255, 0.34);
+}
+
+.city-camera-toggle:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.city-camera-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.city-camera-name {
+  font-weight: 700;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.city-camera-distance {
+  font-variant-numeric: tabular-nums;
+}
+
+.city-camera-credit a {
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.city-camera-credit a:hover {
+  color: var(--accent-cyan);
+}
+
+.city-camera-note {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.city-camera-note[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .city-camera-live-dot {
+    animation: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .city-camera { margin-top: 10px; }
+  .city-camera-caption { font-size: 0.7rem; }
+  .city-camera-badge,
+  .city-camera-toggle { font-size: 0.64rem; padding: 2px 7px; }
+}
+
+/* --- Live cameras on/off switch ------------------------------------------ */
+
+.camera-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(18, 30, 56, 0.6);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.camera-toggle:hover {
+  background: rgba(24, 40, 74, 0.88);
+  color: var(--text-primary);
+}
+
+.camera-toggle:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.camera-toggle[aria-pressed='true'] {
+  color: var(--text-primary);
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+.camera-toggle[aria-pressed='false'] {
+  color: var(--text-dim);
+  opacity: 0.85;
+}
+
+.climate-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+  .climate-controls-row {
+    gap: 8px;
+  }
+  .camera-toggle { font-size: 0.74rem; padding: 5px 10px; }
+}
+
 /* Empty state within climate results */
 .climate-empty-state {
   grid-column: 1 / -1;
@@ -2064,17 +2279,16 @@ body {
 
 /* --- Recommendation tiles ----------------------------------------------- */
 
+/* The advice row is two subcards at every width, including the narrowest
+   phones: the pair is the unit of meaning ("bring this *and* that"), so it is
+   never collapsed to a single column. What shrinks instead is the padding and
+   the type inside each tile - see the media queries below, which must stay
+   after the base rules to win the cascade. */
 .assistant-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   width: 100%;
-}
-
-@media (max-width: 640px) {
-  .assistant-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 html[data-language-pending='true'] body {
@@ -2135,6 +2349,33 @@ html[data-language-pending='true'] body {
   font-size: 0.84rem;
   line-height: 1.5;
   color: var(--text-secondary);
+}
+
+/* Narrow screens keep the pair but tighten it: the padding and internal gaps
+   come off first, then the type, so both subcards stay legible side by side. */
+@media (max-width: 640px) {
+  .assistant-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .assistant-tile { padding: 11px 12px; gap: 6px; }
+  .assistant-tile-label { font-size: 0.72rem; }
+  .assistant-tile-headline { font-size: 0.92rem; line-height: 1.3; }
+  .assistant-tile-detail { font-size: 0.8rem; line-height: 1.45; }
+  .assistant-tile-icon { font-size: 0.95rem; }
+}
+
+@media (max-width: 480px) {
+  .assistant-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .assistant-tile { padding: 9px 10px; gap: 5px; }
+  /* A long compound word must not be what widens a column that is half the
+     viewport wide. */
+  .assistant-tile-headline,
+  .assistant-tile-detail { overflow-wrap: anywhere; }
+  .assistant-tile-label { font-size: 0.68rem; }
+  .assistant-tile-headline { font-size: 0.88rem; line-height: 1.25; }
+  .assistant-tile-detail { font-size: 0.76rem; line-height: 1.4; }
+  .assistant-tile-icon { font-size: 0.9rem; }
 }
 
 /* --- "Rain during your ...?" window selector ----------------------------- */

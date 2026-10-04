@@ -142,6 +142,12 @@ A forecast tells you *what the weather is*. The assistant card — the first thi
 | 👕 **What to wear** | *Layers, jacket or t-shirt, umbrella, sun protection — plus the warmest/coolest hour.* |
 | 🌧️ **Rain during your…** | *Morning / Midday / Afternoon / Evening* — a one-line answer per window. |
 
+### Always two across, at every width
+
+The six tiles are laid out as **two subcards per row on every device**, down to the narrowest phone. The pair is the unit of meaning — *"take an umbrella **and** wear layers"* — so collapsing to a single column on a small screen would change what the row says, not just how much room it takes.
+
+What shrinks instead is the padding and the type inside each tile (`0.78rem → 0.72rem → 0.68rem` for the label, and so on down the scale), and long words are allowed to break rather than widen a column that is half the viewport wide. The `max-width` overrides are declared **after** the base `.assistant-tile` rule so they actually win the cascade — an override placed before the rule it overrides is silently dead CSS, and the tiles would keep their desktop padding on a phone.
+
 ### How it is built
 
 - **No second API call.** The hourly block the dashboard already requests gained `apparent_temperature`, `precipitation`, `wind_speed_10m` and `cloud_cover` — four extra fields on the *same* request. Everything else is computed client-side.
@@ -276,6 +282,107 @@ Your timezone comes from `Intl.DateTimeFormat().resolvedOptions().timeZone`, i.e
 ### Accessibility of the ticking digits
 
 The dashboard, climate grid and suggestion dropdown all live inside `<main aria-live="polite">`. A per-second text change in a polite live region becomes a screen-reader announcement, so every node that rewrites itself each second carries `aria-hidden="true"`; a screen reader would otherwise try to speak the clock sixty times a minute. The meaningful, non-volatile facts stay exposed: the date, the zone abbreviation, and the offset versus you — including in each city card's `aria-label`. The seconds pulse animation is also disabled under `prefers-reduced-motion`.
+
+---
+
+## 📷 Free live city cameras
+
+Every city in the climate grid shows a **free public camera view** of that same city, inside its own card — a forecast tells you what the sky will do, a camera tells you what it is doing.
+
+### What it shows
+
+| | |
+| --- | --- |
+| **The frame** | A snapshot from the nearest free public camera, with its distance from the city centre and its own `Live` badge. |
+| **Attribution** | The source's required wording, linked to its licence. Never omitted when the source supplies it. |
+| **Pause / Play** | A real toggle per card, so a frame refreshing every few minutes is motion you can turn off. |
+| **"No free public camera for this city"** | Shown when there isn't one. Most of the world has none, and the app says so rather than showing a placeholder. |
+
+### Why it can be free
+
+The directory ([datumfeed.com](https://datumfeed.com)) is queried directly over plain CORS-enabled HTTPS — **no API key, no proxy, no build step** — exactly like the Open-Meteo calls. It only lists cameras whose registry licence permits redistribution, and it answers a `bbox` query, so one request covers any city in the app whether or not it is covered.
+
+### Where cameras actually exist
+
+Coverage is real but regional, and the app treats absence as a normal answer rather than a gap:
+
+| Registry | Cities |
+| --- | --- |
+| TfL JamCams | London (and the rest of Greater London) |
+| Caltrans CCTV, WSDOT | California, Washington |
+| Austin Traffic, Ontario 511, Ottawa/Toronto | Texas, Ontario |
+
+A city outside these gets one short line of text. Probing the directory for any of the 72 benchmark cities is what produced that list — `node tools/probe-cameras.js` will re-run the check.
+
+### How it stays cheap and polite
+
+- **Lazy.** The directory is rate-limited to 60 anonymous requests/hour, so a card is only asked about once it is actually scrolled into view (`IntersectionObserver`, 200 px margin), with lookups spaced 900 ms apart. A 72-card filter does not become 72 simultaneous requests.
+- **Cached for the session, including "nothing here".** Re-sorting or re-filtering never re-asks. Results live in `sessionStorage`, never `localStorage` — a camera's answer is true for about a minute.
+- **The source sets the cadence.** Each registry publishes how often it wants to be refreshed (TfL says 180 s, others 60 s), fetched once per session from `/api/registries` and applied per camera. The app never polls faster than the source asks.
+- **Polling only runs while a card is on screen, unpaused, and the camera switch is on.** Off-screen or paused cards hold no timer, and a paused card releases the image itself.
+- **The budget is respected before it is spent.** `x-ratelimit-remaining` is read from the response headers and the app stops asking with two requests left, rather than getting throttled.
+- **Nothing happens until you search.** No camera request is made at page load; the observer is only attached when the climate grid is rendered.
+
+### Accessibility
+
+The frame is `loading="lazy"` and `decoding="async"`, with an `alt` that names the place. The `Live` badge's pulse is disabled under `prefers-reduced-motion`. The pause control is a real `<button>` with `aria-pressed`, and both it and the header switch have visible focus rings — and because the card itself is a `role="button"`, the panel's clicks and key presses stop there instead of opening the city.
+
+### Design decisions
+
+- **`cameras.js` is pure**, like `advice.js` / `glance.js` / `compare.js`: no DOM, no network, no clock of its own. `findCameras` is handed a `fetchJson`, and the current time is passed in. That is what keeps it testable in plain Node.
+- **The panel lives in the card, not in a separate view.** It is the same information in a different tense — a forecast row and a live view of the same place — so it belongs in the same place.
+- **The feed URL is only ever assigned as an attribute**, never parsed as markup, and only `http(s)` survives normalisation. Fields the directory adds that we do not understand are dropped rather than forwarded, because every normalised field ends up in the DOM.
+- **A camera the directory flags `contradicted` is never shown** — a dead feed or misplaced pin in a weather card is worse than no frame.
+- **Coordinates that are absent are rejected, not coerced.** `Number(null)` is `0`, so a naive parse would place a camera with `"lat": null` in the Gulf of Guinea and rank it as the nearest thing on earth.
+
+### Running the tests
+
+```bash
+node --test tests/cameras.test.js        # the engine
+node --test tests/camera-wiring.test.js  # the glue to the page
+node tools/probe-cameras.js             # the real directory, by hand
+```
+
+---
+
+## 🌐 Language chosen from your country
+
+Six dictionaries ship embedded — **English, Greek, German, Italian, Spanish, French** — with no CDN, no fetch and no flash of the wrong language.
+
+### How the language is chosen
+
+Precedence, highest first:
+
+1. **An explicit choice** — `?lang=`, or the language picker. A deliberate choice always wins.
+2. **A previously stored choice**, and only a deliberate one: the stored value is a small JSON object (`{"lang":"el","v":1}`) so an auto-stamped value can never be mistaken for a manual one.
+3. **Your IP country**, looked up just before the first translated text is rendered.
+4. **Your browser's own preference**, and finally English.
+
+The page is held at `visibility: hidden` while step 3 is in flight (`data-language-pending` on the root), so the first thing painted is already the right language.
+
+### Recognising the country, whichever shape it arrives in
+
+The five IP services raced against each other don't agree on what a "country" is: one answers `{"country_code":"DE"}`, another `{"country":"Germany"}`, and another returns a description already written in the visitor's own language. `langForCountry` accepts all three, in order of how much each can be trusted:
+
+| Shape | Example | Resolves to |
+| --- | --- | --- |
+| ISO 3166-1 alpha-2 | `DE` | the code table |
+| An exact name | `Germany`, `Deutschland`, `Ελλάδα` | the name table |
+| The same country named in any embedded language | `Frankreich`, `Grèce`, `Grecia` | **that country's** language — `fr`, `el`, `el` |
+| A loose spelling | `ESPANA`, `Cote d'Ivoire`, `Germany (Federal Republic of)` | accents, casing and trailing qualifiers ignored |
+
+Two details that are easy to get wrong:
+
+- **A name written in one language names a country whose visitors read another.** `Frankreich` is German for France, so it must answer **French**, not German. The localized names are therefore *derived* from `COUNTRY_LANGS` through `Intl.DisplayNames` rather than written out by hand — a hand-written row per language per country is exactly the kind of table that goes quietly wrong.
+- **`UK` is not an ISO code** but is two letters, so a strict alpha-2 branch would reject it outright. It falls through to the name lookups instead.
+
+A country with no embedded dictionary (**Japan, Portugal, Brazil, South Africa…**) resolves to *nothing* rather than to English — declining is better than guessing, because the browser's own preference is a better answer than a language nobody chose.
+
+### Design decisions
+
+- **Five providers, raced.** Any one can be down or rate-limited; the first usable answer wins, and a total failure falls through to the browser rather than blocking startup.
+- **`Intl.DisplayNames`, not a bundled table.** The localized names come from the platform's own CLDR data, so they are correct in all six languages without shipping or maintaining country-name lists.
+- **French is a separate file** (`fr.js`) purely to keep `i18n.js` a readable size; it is loaded between `i18n.js` and `app.js`, and the tests assert that order.
 
 ---
 
