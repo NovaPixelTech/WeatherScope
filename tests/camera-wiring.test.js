@@ -449,3 +449,31 @@ test('the climate results and back bar are owned by Climate Filter mode', () => 
   assert.match(appSource, /state\.matchingCities\.length > 0 && state\.searchMode === 'climate'/,
     'a city load cannot revive the climate back bar in City Search or Compare');
 });
+
+test('camera stills bypass the browser cache and refresh only at the directory cadence', () => {
+  assert.match(appSource, /fetch\(source,\s*\{\s*cache:\s*'no-store'/,
+    'a fresh image blob is fetched instead of reassigning a browser-cached image URL');
+  assert.match(appSource, /URL\.createObjectURL\(blob\)/,
+    'the decoded response replaces the displayed image');
+  assert.match(appSource, /const CAMERA_WALL_PAGE_SIZE = 3/,
+    'the wall stays within the frame endpoint request budget');
+  assert.match(appSource, /const delay = \(Math\.max\(15, seconds\) \+ 2\) \* 1000/,
+    'refreshes wait past the source-published frame cache cadence');
+  ['camera-wall-refresh-note', 'camera-wall-pagination', 'camera-wall-prev-btn', 'camera-wall-next-btn'].forEach((id) => {
+    assert.ok(html.includes(`id="${id}"`), `#${id} is missing`);
+  });
+});
+
+test('European live-video listings link to official players without bypassing embed restrictions', () => {
+  const urls = [...appSource.matchAll(/url: '(https:\/\/www\.skylinewebcams\.com\/[^']+)'/g)].map((match) => match[1]);
+  assert.equal(urls.length, 22, 'curated Greece, Italy and France provider pages are listed');
+  assert.ok(urls.some((url) => url.includes('/ellada/atiki/athina/athens.html')));
+  assert.ok(urls.some((url) => url.includes('/makedonia/thessaloniki/thessaloniki.html')));
+  assert.ok(urls.some((url) => url.includes('/epirus/ioannina/central-square-court-house.html')));
+  assert.ok(urls.some((url) => url.includes('/france/ile-de-france/paris/tour-eiffel.html')));
+  assert.match(appSource, /link\.target = '_blank'[\s\S]{0,80}link\.rel = 'noopener noreferrer'/,
+    'provider video opens safely in its official page');
+  assert.match(appSource, /cameraHub\.externalVideoNote/);
+  assert.match(appSource, /X-Frame-Options|prohibits embedding its video/,
+    'the integration respects the provider’s no-embed terms instead of copying stream URLs');
+});

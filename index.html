@@ -512,11 +512,20 @@
             <p class="state-text" data-i18n="cameraHub.loadingCity">Opening the cameras...</p>
           </div>
 
+          <div class="camera-wall-pagination" id="camera-wall-pagination" hidden>
+            <span class="camera-wall-page-label" id="camera-wall-page-label" aria-live="polite"></span>
+            <div class="camera-wall-page-actions">
+              <button type="button" class="btn btn-secondary" id="camera-wall-prev-btn" data-i18n="cameraHub.previousCameras">Previous cameras</button>
+              <button type="button" class="btn btn-secondary" id="camera-wall-next-btn" data-i18n="cameraHub.nextCameras">More cameras</button>
+            </div>
+          </div>
+
           <!-- The wall. A plain <img> per frame on purpose: the directory serves
                each frame with the source's own refresh cadence in Cache-Control,
                so the browser keeps them live by itself and the app runs no
                polling loop at all. -->
           <div class="camera-wall" id="camera-wall" role="list" aria-label="Live cameras in the chosen city" data-i18n-aria-label="cameraHub.wallAria"></div>
+          <p id="camera-wall-refresh-note" class="camera-wall-refresh-note" hidden></p>
           <p id="camera-city-empty" class="camera-catalogue-status camera-catalogue-empty" hidden></p>
 
           <!-- The city climate card, beside the frames rather than behind a

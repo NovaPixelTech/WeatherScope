@@ -884,6 +884,11 @@
     cameraCityLoading: document.getElementById('camera-city-loading'),
     cameraCityEmpty: document.getElementById('camera-city-empty'),
     cameraWall: document.getElementById('camera-wall'),
+    cameraWallRefreshNote: document.getElementById('camera-wall-refresh-note'),
+    cameraWallPagination: document.getElementById('camera-wall-pagination'),
+    cameraWallPageLabel: document.getElementById('camera-wall-page-label'),
+    cameraWallPrevBtn: document.getElementById('camera-wall-prev-btn'),
+    cameraWallNextBtn: document.getElementById('camera-wall-next-btn'),
     cameraCityClimateBody: document.getElementById('camera-city-climate-body'),
     cameraCityClimate: document.getElementById('camera-city-climate'),
     cameraBackAllBtn: document.getElementById('camera-back-all-btn'),
@@ -3032,9 +3037,12 @@ ${CAMERA_PANEL_HTML}
     openCameraCity: null,
     /** Cameras for that city, and whether a request is in flight for it. */
     openCameraWall: [],
+    openExternalCameras: [],
     openCameraRequest: null,
     openCameraWeather: null,
     cameraWallTimer: null,
+    cameraWallPage: 0,
+    cameraWallObjectUrls: new Map(),
     /** The query typed into the catalogue filter, kept for language switches. */
     cameraFilterQuery: '',
     remainingBudget: null,
@@ -3117,7 +3125,8 @@ ${CAMERA_PANEL_HTML}
         });
         cameraState.cadenceByRegistry = map;
         cameraState.registries = list;
-        cameraState.catalogue = engine.catalogRegions ? engine.catalogRegions(list) : [];
+        const directoryCities = engine.catalogRegions ? engine.catalogRegions(list) : [];
+        cameraState.catalogue = directoryCities.concat(buildEuropeanVideoCatalogue(engine));
         cameraState.cadenceFetchedAt = Date.now();
         return map;
       } catch (err) {
@@ -3129,6 +3138,34 @@ ${CAMERA_PANEL_HTML}
     })();
 
     return cameraState.cadenceRequest;
+  }
+
+  /** Add provider-link cities to the directory-backed camera catalogue. */
+  function buildEuropeanVideoCatalogue(engine) {
+    if (!engine || typeof engine.regionQuery !== 'function') return [];
+    const byCity = new Map();
+    EUROPEAN_LIVE_VIDEO_CAMERAS.forEach((camera) => {
+      const query = engine.regionQuery(camera.city);
+      if (!query) return;
+      let entry = byCity.get(query);
+      if (!entry) {
+        const countryCode = camera.country === 'Greece' ? 'GR' : camera.country === 'Italy' ? 'IT' : 'FR';
+        entry = {
+          query,
+          name: camera.city,
+          registry: 'skylinewebcams-europe',
+          registryName: 'SkylineWebcams · European live video',
+          country: countryCode,
+          flag: countryCode === 'GR' ? '🇬🇷' : countryCode === 'IT' ? '🇮🇹' : '🇫🇷',
+          attribution: 'SkylineWebcams',
+          attributionUrl: 'https://www.skylinewebcams.com/en/terms-of-use.html',
+          externalCameras: [],
+        };
+        byCity.set(query, entry);
+      }
+      entry.externalCameras.push(camera);
+    });
+    return Array.from(byCity.values());
   }
 
   /** Kept as the name the panels already use: it is the cadence map they read. */
@@ -4097,6 +4134,51 @@ ${CAMERA_PANEL_HTML}
   //    for the six fields the strip actually shows.
   // ==========================================================================
 
+  /**
+   * Official European live-video pages that permit sharing by link.
+   *
+   * The Datumfeed sources above publish refreshed JPEGs, not video. SkylineWebcams
+   * publishes genuine live streams for many European places, but its terms allow
+   * embedding live video only for camera hosts; other sites may share links and
+   * use its separately supplied five-minute photogram embed. Its pages also send
+   * `X-Frame-Options: SAMEORIGIN`, so an iframe in WeatherScope is blocked. These
+   * entries therefore open the official live player in a new tab - no scraped
+   * HLS URLs, copied frames, or player circumvention - while the selected city's
+   * climate remains visible here.
+   *
+   * These are intentionally curated official links rather than a scrape of a
+   * provider's site. The city pages are public and currently declare a live
+   * BroadcastEvent; individual pages remain authoritative if a provider retires
+   * or moves a camera.
+   */
+  const EUROPEAN_LIVE_VIDEO_CAMERAS = [
+    { city: 'Athens', country: 'Greece', name: 'Athens and the Acropolis', url: 'https://www.skylinewebcams.com/en/webcam/ellada/atiki/athina/athens.html' },
+    { city: 'Athens', country: 'Greece', name: 'Hellenic Parliament, Syntagma Square', url: 'https://www.skylinewebcams.com/en/webcam/ellada/atiki/athina/hellenic-parliament.html' },
+    { city: 'Athens', country: 'Greece', name: 'Parthenon and Acropolis', url: 'https://www.skylinewebcams.com/en/webcam/ellada/atiki/athina/acropolis-parthenon.html' },
+    { city: 'Athens', country: 'Greece', name: 'Ermou Street and Syntagma Square', url: 'https://www.skylinewebcams.com/en/webcam/ellada/atiki/athina/ermou-street-syntagma-square.html' },
+    { city: 'Piraeus', country: 'Greece', name: 'Piraeus Harbour', url: 'https://www.skylinewebcams.com/en/webcam/ellada/atiki/piraeus/piraeus.html' },
+    { city: 'Thessaloniki', country: 'Greece', name: 'Thessaloniki and the White Tower', url: 'https://www.skylinewebcams.com/en/webcam/ellada/makedonia/thessaloniki/thessaloniki.html' },
+    { city: 'Thessaloniki', country: 'Greece', name: 'Aristotelous Square', url: 'https://www.skylinewebcams.com/en/webcam/ellada/makedonia/thessaloniki/plateia-aristotelous.html' },
+    { city: 'Santorini', country: 'Greece', name: 'Santorini Caldera', url: 'https://www.skylinewebcams.com/en/webcam/ellada/naigaio/kyklades/santorini.html' },
+    { city: 'Santorini', country: 'Greece', name: 'Firostefani', url: 'https://www.skylinewebcams.com/en/webcam/ellada/naigaio/kyklades/santorini-firostefani.html' },
+    { city: 'Chania', country: 'Greece', name: 'Old Venetian Harbour', url: 'https://www.skylinewebcams.com/en/webcam/ellada/crete/chania/venetian-harbor.html' },
+    { city: 'Heraklion', country: 'Greece', name: 'Heraklion Marina and Koule Fortress', url: 'https://www.skylinewebcams.com/en/webcam/ellada/crete/heraklion/heraklion.html' },
+    { city: 'Rhodes', country: 'Greece', name: 'Rhodes - Mandraki Harbour', url: 'https://www.skylinewebcams.com/en/webcam/ellada/naigaio/dodecanisa/rhodes-mandraki-harbour.html' },
+    { city: 'Corfu', country: 'Greece', name: 'Corfu Port', url: 'https://www.skylinewebcams.com/en/webcam/ellada/ionian-islands/corfu/mount-pantokrator.html' },
+    { city: 'Kavala', country: 'Greece', name: 'Kavala city and castle', url: 'https://www.skylinewebcams.com/en/webcam/ellada/makedonia/kavala/kavala.html' },
+    { city: 'Ioannina', country: 'Greece', name: 'Ioannina Central Square', url: 'https://www.skylinewebcams.com/en/webcam/ellada/epirus/ioannina/central-square-court-house.html' },
+    { city: 'Parga', country: 'Greece', name: 'Panorama of Parga', url: 'https://www.skylinewebcams.com/en/webcam/ellada/epirus/preveza/panorama-parga.html' },
+    { city: 'Patras', country: 'Greece', name: 'Patras and the Gulf of Patras', url: 'https://www.skylinewebcams.com/en/webcam/ellada/peloponnese/patras/romanos-achaea.html' },
+    { city: 'Nafplio', country: 'Greece', name: 'Drepano Beach near Nafplio', url: 'https://www.skylinewebcams.com/en/webcam/ellada/peloponnese/argolis/drepano-beach.html' },
+    { city: 'Larissa', country: 'Greece', name: 'Larissa Central Square', url: 'https://www.skylinewebcams.com/en/webcam/ellada/thessalia/larissa/kentriki-platia-larissas.html' },
+    { city: 'Trikala', country: 'Greece', name: 'Meteora', url: 'https://www.skylinewebcams.com/en/webcam/ellada/thessalia/trikala/meteora.html' },
+    { city: 'Milan', country: 'Italy', name: 'Milan Cathedral', url: 'https://www.skylinewebcams.com/en/webcam/italia/lombardia/milano/duomo-milano.html' },
+    { city: 'Paris', country: 'France', name: 'Eiffel Tower', url: 'https://www.skylinewebcams.com/en/webcam/france/ile-de-france/paris/tour-eiffel.html' },
+  ];
+
+  /** Only three source-cached JPEGs are refreshed per cadence (<=180 requests/hour at 60s). */
+  const CAMERA_WALL_PAGE_SIZE = 3;
+
   /** True when the camera browser has somewhere to render. */
   function cameraBrowserReady() {
     return Boolean(elements.cameraBrowserSection && elements.cameraCatalogueGroups);
@@ -4368,11 +4450,19 @@ ${CAMERA_PANEL_HTML}
     if (!cameraBrowserReady() || !entry) return;
     const engine = cameraEngine();
     if (!engine) return;
-    if (cameraState.openCameraCity === entry && (cameraState.openCameraRequest || cameraState.openCameraWall.length)) return;
+    if (cameraState.openCameraCity === entry && (cameraState.openCameraRequest || cameraState.openCameraWall.length || cameraState.openExternalCameras.length)) return;
+
+    if (cameraState.cameraWallTimer !== null) {
+      clearTimeout(cameraState.cameraWallTimer);
+      cameraState.cameraWallTimer = null;
+    }
+    releaseCameraWallObjectUrls();
 
     cameraState.openCameraCity = entry;
     cameraState.openCameraWall = [];
+    cameraState.openExternalCameras = [];
     cameraState.openCameraWeather = null;
+    cameraState.cameraWallPage = 0;
 
     if (elements.cameraCatalogueCard) elements.cameraCatalogueCard.hidden = true;
     if (elements.cameraCityCard) elements.cameraCityCard.hidden = false;
@@ -4384,6 +4474,8 @@ ${CAMERA_PANEL_HTML}
     if (elements.cameraCityCount) elements.cameraCityCount.textContent = '';
     if (elements.cameraCityEmpty) elements.cameraCityEmpty.hidden = true;
     if (elements.cameraCityLoading) elements.cameraCityLoading.hidden = false;
+    if (elements.cameraWallPagination) elements.cameraWallPagination.hidden = true;
+    if (elements.cameraWallRefreshNote) elements.cameraWallRefreshNote.hidden = true;
     if (elements.cameraWall) elements.cameraWall.innerHTML = '';
     if (elements.cameraCityClimateBody) elements.cameraCityClimateBody.innerHTML = '';
     if (elements.cameraCityClimate) elements.cameraCityClimate.hidden = true;
@@ -4391,6 +4483,16 @@ ${CAMERA_PANEL_HTML}
     if (elements.cameraCityCard) elements.cameraCityCard.scrollIntoView({ block: 'start' });
 
     renderCameraCityClimate(entry);
+
+    // These are provider-hosted live video pages, not image feeds. The provider
+    // explicitly permits linking/sharing, but prohibits embedding its video for
+    // non-hosts and blocks iframes; keep the city climate here and let the link
+    // open the official, live player in a new tab.
+    if (Array.isArray(entry.externalCameras) && entry.externalCameras.length) {
+      cameraState.openExternalCameras = entry.externalCameras.slice();
+      paintEuropeanVideoWall(entry);
+      return;
+    }
 
     if (cameraLookupBlocked()) {
       finishCameraCityLoad(t('cameraHub.throttled', null, 'The camera directory is rate-limiting us, so this city cannot be opened right now.'));
@@ -4456,12 +4558,13 @@ ${CAMERA_PANEL_HTML}
   /**
    * The wall.
    *
-   * Every frame is a plain `<img>` pointing at the directory's frame endpoint,
-   * and that is the whole mechanism: the response carries the source's own
-   * refresh cadence in `Cache-Control`, so the browser revalidates each frame on
-   * its own schedule and the app never runs a timer. A camera that publishes a
-   * *stream* instead of a still is played in a `<video>`, because a still frame
-   * would understate what it publishes.
+   * Directory feeds are JPEG stills, not video. Three are shown per page to
+   * respect the separate frame-endpoint budget; the other candidates remain
+   * reachable through previous/next controls. Each still is fetched as a
+   * CORS-readable blob with `cache:'no-store'`, avoiding the browser cache that
+   * made reassigning the same image URL appear frozen. A single timer requests
+   * the visible page just slower than its registry's cadence. Real streams, if
+   * a source publishes one, use `<video>` instead.
    *
    * Nothing is written with innerHTML: every name here is third-party text from
    * the directory, and `safeUrl` in the engine is what guarantees a feed URL
@@ -4471,22 +4574,12 @@ ${CAMERA_PANEL_HTML}
     if (!elements.cameraWall) return;
     const engine = cameraEngine();
     const host = elements.cameraWall;
+    releaseCameraWallObjectUrls();
     host.innerHTML = '';
 
     if (elements.cameraCityLoading) elements.cameraCityLoading.hidden = true;
     if (elements.cameraCityEmpty) elements.cameraCityEmpty.hidden = true;
-
-    if (elements.cameraCityCount) {
-      const total = cameras.length;
-      elements.cameraCityCount.textContent = tp(
-        'cameraHub.cameraCountOne',
-        'cameraHub.cameraCountMany',
-        total,
-        { count: total },
-        `${total} camera`,
-        `${total} cameras`
-      );
-    }
+    if (elements.cameraWallRefreshNote) elements.cameraWallRefreshNote.hidden = true;
 
     if (!cameras.length) {
       if (elements.cameraCityEmpty) {
@@ -4498,12 +4591,122 @@ ${CAMERA_PANEL_HTML}
         elements.cameraCityEmpty.hidden = false;
       }
       if (elements.cameraOpenForecastBtn) elements.cameraOpenForecastBtn.disabled = false;
+      if (elements.cameraWallPagination) elements.cameraWallPagination.hidden = true;
       return;
     }
 
-    cameras.forEach((camera) => host.appendChild(buildCameraWallTile(camera, engine)));
+    const pageCount = Math.ceil(cameras.length / CAMERA_WALL_PAGE_SIZE);
+    cameraState.cameraWallPage = Math.max(0, Math.min(cameraState.cameraWallPage, pageCount - 1));
+    const start = cameraState.cameraWallPage * CAMERA_WALL_PAGE_SIZE;
+    const visibleCameras = cameras.slice(start, start + CAMERA_WALL_PAGE_SIZE);
+    if (elements.cameraCityCount) {
+      elements.cameraCityCount.textContent = t(
+        'cameraHub.wallCount',
+        { shown: visibleCameras.length, total: cameras.length },
+        `Showing ${visibleCameras.length} of ${cameras.length} available cameras`
+      );
+    }
+    if (elements.cameraWallPagination) elements.cameraWallPagination.hidden = pageCount < 2;
+    if (elements.cameraWallPageLabel) {
+      elements.cameraWallPageLabel.textContent = t(
+        'cameraHub.pageCount',
+        { page: cameraState.cameraWallPage + 1, pages: pageCount },
+        `Camera group ${cameraState.cameraWallPage + 1} of ${pageCount}`
+      );
+    }
+    if (elements.cameraWallPrevBtn) elements.cameraWallPrevBtn.disabled = cameraState.cameraWallPage === 0;
+    if (elements.cameraWallNextBtn) elements.cameraWallNextBtn.disabled = cameraState.cameraWallPage >= pageCount - 1;
+
+    visibleCameras.forEach((camera) => host.appendChild(buildCameraWallTile(camera, engine)));
     if (elements.cameraOpenForecastBtn) elements.cameraOpenForecastBtn.disabled = false;
-    scheduleCameraWallRefresh(cameras);
+    const cadence = visibleCameras.reduce((slowest, camera) => {
+      const seconds = camera && Number.isFinite(camera.pollSeconds) && camera.pollSeconds > 0 ? camera.pollSeconds : 60;
+      return Math.max(slowest, seconds);
+    }, 15);
+    if (elements.cameraWallRefreshNote) {
+      elements.cameraWallRefreshNote.textContent = t(
+        'cameraHub.snapshotNote',
+        { seconds: cadence },
+        `These sources provide still images, not video. Frames refresh about every ${cadence} seconds.`
+      );
+      elements.cameraWallRefreshNote.hidden = false;
+    }
+    refreshCameraWallFrames(visibleCameras);
+    scheduleCameraWallRefresh(visibleCameras, cadence);
+  }
+
+  function changeCameraWallPage(delta) {
+    if (!cameraState.openCameraCity || !cameraState.openCameraWall.length) return;
+    const pageCount = Math.ceil(cameraState.openCameraWall.length / CAMERA_WALL_PAGE_SIZE);
+    cameraState.cameraWallPage = (cameraState.cameraWallPage + delta + pageCount) % pageCount;
+    paintCameraWall(cameraState.openCameraWall, cameraState.openCameraCity);
+  }
+
+  /** Paint provider-hosted European livestreams as honest outbound live links. */
+  function paintEuropeanVideoWall(entry) {
+    if (!elements.cameraWall || !entry) return;
+    releaseCameraWallObjectUrls();
+    elements.cameraWall.innerHTML = '';
+    if (elements.cameraCityLoading) elements.cameraCityLoading.hidden = true;
+    if (elements.cameraCityEmpty) elements.cameraCityEmpty.hidden = true;
+    if (elements.cameraWallPagination) elements.cameraWallPagination.hidden = true;
+    if (elements.cameraWallRefreshNote) {
+      elements.cameraWallRefreshNote.textContent = t(
+        'cameraHub.externalVideoNote',
+        null,
+        'These are continuous live videos hosted by SkylineWebcams. Its terms allow sharing links; opening one launches the official player in a new tab.'
+      );
+      elements.cameraWallRefreshNote.hidden = false;
+    }
+    if (elements.cameraCityCount) {
+      elements.cameraCityCount.textContent = t(
+        'cameraHub.externalVideoCount',
+        { count: cameraState.openExternalCameras.length },
+        `${cameraState.openExternalCameras.length} live video links`
+      );
+    }
+
+    cameraState.openExternalCameras.forEach((camera) => {
+      const tile = document.createElement('figure');
+      tile.className = 'camera-wall-tile camera-external-video-tile';
+      tile.setAttribute('role', 'listitem');
+
+      const poster = document.createElement('div');
+      poster.className = 'camera-external-video-poster';
+      poster.setAttribute('aria-hidden', 'true');
+      const icon = document.createElement('span');
+      icon.className = 'camera-external-video-icon';
+      icon.textContent = '▶';
+      poster.appendChild(icon);
+      const label = document.createElement('span');
+      label.className = 'camera-external-video-label';
+      label.textContent = t('cameraHub.continuousVideo', null, 'Continuous live video');
+      poster.appendChild(label);
+      tile.appendChild(poster);
+
+      const caption = document.createElement('figcaption');
+      caption.className = 'camera-wall-caption';
+      const name = document.createElement('span');
+      name.className = 'camera-wall-name';
+      name.textContent = camera.name;
+      caption.appendChild(name);
+
+      const link = document.createElement('a');
+      link.className = 'camera-external-video-link';
+      link.href = camera.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = t('cameraHub.watchExternal', null, 'Watch live at SkylineWebcams ↗');
+      caption.appendChild(link);
+      const credit = document.createElement('span');
+      credit.className = 'camera-wall-credit';
+      credit.textContent = t('camera.attribution', { source: 'SkylineWebcams' }, 'Camera: SkylineWebcams');
+      caption.appendChild(credit);
+
+      tile.appendChild(caption);
+      elements.cameraWall.appendChild(tile);
+    });
+    if (elements.cameraOpenForecastBtn) elements.cameraOpenForecastBtn.disabled = false;
   }
 
   function buildCameraWallTile(camera, engine) {
@@ -4529,8 +4732,8 @@ ${CAMERA_PANEL_HTML}
       img.className = 'camera-wall-media';
       img.loading = 'lazy';
       img.decoding = 'async';
-      img.src = source;
       img.dataset.cameraFrameSource = source;
+      img.dataset.cameraId = camera.id;
       if (camera.imageUrl && camera.imageUrl !== source) img.dataset.cameraFrameFallback = camera.imageUrl;
       // The place is named, not the camera: a visitor looking at a street knows
       // where they are, and the name below carries the specific junction.
@@ -4611,6 +4814,8 @@ ${CAMERA_PANEL_HTML}
     if (cameraState.openCameraCity) {
       cameraState.openCameraCity = null;
       cameraState.openCameraWall = [];
+      cameraState.openExternalCameras = [];
+      releaseCameraWallObjectUrls();
       // Frames are plain <img> elements, so dropping the subtree is the whole
       // cleanup: the browser closes every connection with the last reference.
       if (elements.cameraWall) elements.cameraWall.innerHTML = '';
@@ -4623,38 +4828,84 @@ ${CAMERA_PANEL_HTML}
   /**
    * Revalidate the wall on the source's own cadence.
    *
-   * The frame endpoint caches each upstream picture for precisely this long
-   * and publishes that duration in Cache-Control. After it expires, dropping
-   * and restoring the same `src` asks the browser to revalidate the resource;
-   * the server then either returns the newly polled frame or the last cached
-   * one. There is one timer for the visible city wall, never one per tile, and
-   * closing the city or switching the master toggle off releases it.
+   * The frame endpoint caches each upstream picture for precisely this long.
+   * The browser cache is bypassed for each update, while the upstream source is
+   * still protected by the directory cache. There is one timer for the visible
+   * page, never one per tile, and closing the city hands back every blob URL.
    */
-  function scheduleCameraWallRefresh(cameras) {
+  function releaseCameraWallObjectUrls() {
+    if (!cameraState.cameraWallObjectUrls) return;
+    cameraState.cameraWallObjectUrls.forEach((url) => {
+      try { URL.revokeObjectURL(url); } catch (err) { /* object URLs are optional in constrained browsers */ }
+    });
+    cameraState.cameraWallObjectUrls.clear();
+  }
+
+  /** Fetch with the proxy's CORS support and bypass the browser HTTP cache. */
+  async function loadCameraWallFrame(image) {
+    const source = image && image.dataset.cameraFrameSource;
+    if (!source || typeof fetch !== 'function') return;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+      let response;
+      try {
+        response = await fetch(source, { cache: 'no-store', credentials: 'omit', signal: controller.signal });
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (!response.ok) throw new Error(`Camera frame responded ${response.status}`);
+      const contentType = response.headers && response.headers.get ? response.headers.get('content-type') || '' : '';
+      if (contentType && contentType.indexOf('image/') !== 0) throw new Error('Camera endpoint did not return an image');
+      const blob = await response.blob();
+      if (!image.isConnected || cameraState.openCameraCity === null) return;
+      const objectUrl = URL.createObjectURL(blob);
+      const cameraId = image.dataset.cameraId || source;
+      const previous = cameraState.cameraWallObjectUrls.get(cameraId);
+      if (previous) URL.revokeObjectURL(previous);
+      cameraState.cameraWallObjectUrls.set(cameraId, objectUrl);
+      image.dataset.cameraTriedFallback = 'true';
+      image.src = objectUrl;
+    } catch (err) {
+      // The directory proxy can be unavailable or forbidden by a source's
+      // terms. A plain <img> may still render the source's own public feed URL;
+      // it is the display-only fallback and is never fetched through JS.
+      const fallback = image && image.dataset.cameraFrameFallback;
+      if (fallback && image.isConnected && image.dataset.cameraTriedFallback !== 'true') {
+        image.dataset.cameraTriedFallback = 'true';
+        image.src = fallback;
+      } else if (image && image.isConnected && !image.src) {
+        const note = document.createElement('span');
+        note.className = 'camera-wall-note';
+        note.textContent = t('camera.offline', null, 'Camera unavailable');
+        image.parentNode.insertBefore(note, image);
+      }
+    }
+  }
+
+  function refreshCameraWallFrames(cameras) {
+    if (!elements.cameraWall || !camerasEnabled()) return;
+    const images = Array.from(elements.cameraWall.querySelectorAll('img[data-camera-frame-source]'));
+    images.forEach((image) => { loadCameraWallFrame(image); });
+  }
+
+  function scheduleCameraWallRefresh(cameras, cadenceSeconds) {
     if (cameraState.cameraWallTimer !== null) {
       clearTimeout(cameraState.cameraWallTimer);
       cameraState.cameraWallTimer = null;
     }
     if (!cameraState.openCameraCity || !camerasEnabled() || !Array.isArray(cameras) || !cameras.length) return;
 
-    const seconds = cameras.reduce((smallest, camera) => {
-      const requested = camera && Number.isFinite(camera.pollSeconds) && camera.pollSeconds > 0
-        ? camera.pollSeconds
-        : 60;
-      return Math.min(smallest, requested);
-    }, Infinity);
-    const delay = Math.max(15, seconds) * 1000;
+    const seconds = Number.isFinite(cadenceSeconds) && cadenceSeconds > 0 ? cadenceSeconds : 60;
+    // A small buffer lets the directory-side max-age cache expire before the
+    // next no-store fetch. The API enforces source cadence independently.
+    const delay = (Math.max(15, seconds) + 2) * 1000;
 
     cameraState.cameraWallTimer = setTimeout(() => {
       cameraState.cameraWallTimer = null;
       if (!cameraState.openCameraCity || !camerasEnabled() || !elements.cameraWall) return;
-      Array.from(elements.cameraWall.querySelectorAll('img[data-camera-frame-source]')).forEach((image) => {
-        const source = image.dataset.cameraFrameSource;
-        if (!source) return;
-        image.removeAttribute('src');
-        image.src = source;
-      });
-      scheduleCameraWallRefresh(cameraState.openCameraWall);
+      refreshCameraWallFrames(cameras);
+      scheduleCameraWallRefresh(cameras, seconds);
     }, delay);
   }
 
@@ -4667,6 +4918,10 @@ ${CAMERA_PANEL_HTML}
    */
   function refreshCameraWall() {
     if (!cameraBrowserReady() || !cameraState.openCameraCity) return;
+    if (cameraState.openExternalCameras.length) {
+      paintEuropeanVideoWall(cameraState.openCameraCity);
+      return;
+    }
     if (camerasEnabled()) {
       if (!cameraState.openCameraWall.length && !cameraState.openCameraRequest) {
         openCameraCity(cameraState.openCameraCity);
@@ -4679,6 +4934,7 @@ ${CAMERA_PANEL_HTML}
       clearTimeout(cameraState.cameraWallTimer);
       cameraState.cameraWallTimer = null;
     }
+    releaseCameraWallObjectUrls();
     if (elements.cameraWall) elements.cameraWall.innerHTML = '';
     finishCameraCityLoad(t('camera.off', null, 'Live cameras are off'));
   }
@@ -6765,6 +7021,12 @@ const toCompare = state.searchMode === 'compare';
         openCameraCityForecast();
       });
     }
+    if (elements.cameraWallPrevBtn) {
+      elements.cameraWallPrevBtn.addEventListener('click', () => changeCameraWallPage(-1));
+    }
+    if (elements.cameraWallNextBtn) {
+      elements.cameraWallNextBtn.addEventListener('click', () => changeCameraWallPage(1));
+    }
 
     // Back to Climate Results button
     elements.backToResultsBtn.addEventListener('click', () => {
@@ -7011,7 +7273,8 @@ const toCompare = state.searchMode === 'compare';
         // from its cached catalogue rather than refetched.
         if (cameraState.catalogue && cameraState.catalogue.length && state.searchMode === 'cameras') {
           if (cameraState.openCameraCity) {
-            paintCameraWall(cameraState.openCameraWall, cameraState.openCameraCity);
+            if (cameraState.openExternalCameras.length) paintEuropeanVideoWall(cameraState.openCameraCity);
+            else paintCameraWall(cameraState.openCameraWall, cameraState.openCameraCity);
             if (cameraState.openCameraWeather) {
               paintCameraCityClimate(cameraState.openCameraCity, cameraState.openCameraWeather);
             }

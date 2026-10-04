@@ -3891,6 +3891,42 @@ html[data-language-pending='true'] body {
   gap: 13px;
 }
 
+.camera-wall-refresh-note {
+  margin: 11px 0 0;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.camera-wall-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 12px;
+}
+
+.camera-wall-pagination[hidden] {
+  display: none !important;
+}
+
+.camera-wall-page-label {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.camera-wall-page-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.camera-wall-page-actions .btn {
+  min-height: 36px;
+  padding: 7px 12px;
+  font-size: 0.75rem;
+}
+
 .camera-wall-tile {
   position: relative;
   min-width: 0;
@@ -3908,6 +3944,16 @@ html[data-language-pending='true'] body {
   aspect-ratio: 16 / 10;
   object-fit: cover;
   background: linear-gradient(135deg, rgba(14, 34, 55, 0.9), rgba(4, 10, 20, 0.95));
+}
+
+.camera-wall-tile:has(.camera-wall-media:not([src])) .camera-wall-media {
+  background: linear-gradient(105deg, rgba(14, 34, 55, 0.9) 20%, rgba(43, 71, 100, 0.65) 38%, rgba(14, 34, 55, 0.9) 56%);
+  background-size: 220% 100%;
+  animation: camera-frame-loading 1.5s ease-in-out infinite;
+}
+
+@keyframes camera-frame-loading {
+  to { background-position-x: -220%; }
 }
 
 .camera-wall-badge {
@@ -3973,6 +4019,44 @@ html[data-language-pending='true'] body {
   color: var(--text-secondary);
   font-size: 0.85rem;
   text-align: center;
+}
+
+.camera-external-video-poster {
+  display: grid;
+  min-height: 150px;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  color: #e0f2fe;
+  background: radial-gradient(circle at 50% 40%, rgba(14, 165, 233, 0.34), rgba(4, 10, 20, 0.96) 68%);
+}
+
+.camera-external-video-icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  padding-left: 3px;
+  border: 1px solid rgba(186, 230, 253, 0.45);
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(14, 165, 233, 0.25);
+  box-shadow: 0 0 28px rgba(14, 165, 233, 0.28);
+}
+
+.camera-external-video-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.camera-external-video-link {
+  width: fit-content;
+  color: #7dd3fc;
+  font-size: 0.73rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .camera-city-climate {
@@ -4094,6 +4178,11 @@ html[data-language-pending='true'] body {
     width: 100%;
     margin: 0;
     grid-template-columns: repeat(3, 1fr);
+  }
+
+  .camera-wall-pagination {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 
