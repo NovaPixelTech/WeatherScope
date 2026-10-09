@@ -330,10 +330,11 @@
               <div class="climate-sort-wrapper">
                 <label for="climate-sort-select" class="sort-label" data-i18n="climate.sortLabel">Sort:</label>
                 <!-- Options are rebuilt from the active climate filter on every render:
-                     each measurement the filter constrains (temperature, humidity, wind)
-                     is offered higher-to-lower and lower-to-higher, and city name is
-                     always available. This single option is the pre-render baseline;
-                     it is always present in the generated list too. -->
+                     each preset's related axes (temperature, humidity, wind,
+                     precipitation, cloud cover) are offered higher-to-lower and
+                     lower-to-higher, and city name is always available. This
+                     single option is the pre-render baseline; it is always
+                     present in the generated list too. -->
                 <select id="climate-sort-select" class="climate-select">
                   <option value="name-asc" data-i18n="climate.sortNameAsc">City name (A-Z)</option>
                 </select>

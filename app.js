@@ -1401,7 +1401,7 @@
     const lats = WORLD_CITIES.map((c) => c.latitude).join(',');
     const lons = WORLD_CITIES.map((c) => c.longitude).join(',');
 
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,cloud_cover,wind_speed_10m`;
     const rawList = await fetchJson(url);
     const dataList = Array.isArray(rawList) ? rawList : [rawList];
 
@@ -5116,43 +5116,73 @@ ${CAMERA_PANEL_HTML}
   // Adaptive Result Sorting
   // --------------------------------------------------------------------------
   // The sort dropdown mirrors the active climate filter instead of offering a
-  // fixed list. Every measurement the filter actually constrains becomes a
-  // sortable axis in both directions, so a "Gale" search offers wind ordering
-  // and nothing else, while "Beach Day" (clear skies + warm) offers temperature
-  // ordering. City name is unconditional - every city has one.
+  // fixed list. Every preset gets the ordering criteria related to what it
+  // selects for - and both directions of each one. The temperature bands gain
+  // temperature, the humidity and wind presets gain their own axis, and the
+  // sky presets add cloud-cover and precipitation axes so a "Sunny" list can
+  // run clearest-first, a "Cloudy" one most-overcast-first and a "Rainy" one
+  // heaviest-first. City name stays unconditional - every city has one.
   // ==========================================================================
-  const SORT_DIMENSIONS = [
-    {
-      key: 'temp',
-      label: 'Temperature',
-      applies: (criteria) => criteria.tempMin !== null || criteria.tempMax !== null,
-      value: (entry) => entry.current.temperature_2m,
-    },
-    {
-      key: 'humidity',
-      label: 'Humidity',
-      applies: (criteria) => criteria.minHumidity !== null || criteria.maxHumidity !== null,
-      value: (entry) => entry.current.relative_humidity_2m,
-    },
-    {
-      key: 'wind',
-      label: 'Wind speed',
-      applies: (criteria) => criteria.minWind !== null,
-      value: (entry) => entry.current.wind_speed_10m,
-    },
-  ];
+  const SORT_AXES = {
+    temp: { label: 'Temperature', value: (entry) => entry.current.temperature_2m },
+    humidity: { label: 'Humidity', value: (entry) => entry.current.relative_humidity_2m },
+    wind: { label: 'Wind speed', value: (entry) => entry.current.wind_speed_10m },
+    precip: { label: 'Precipitation', value: (entry) => entry.current.precipitation },
+    cloud: { label: 'Cloud cover', value: (entry) => entry.current.cloud_cover },
+  };
+
+  // Fixed display order, so a combined preset (Beach, Ski, Tropical, ...) never
+  // reorders its axes depending on which keyword the parser happened to expand
+  // first.
+  const SORT_AXIS_PRIORITY = ['temp', 'humidity', 'wind', 'precip', 'cloud'];
+
+  const SORT_AXIS_LABEL_KEY = {
+    temp: 'sortTemperature',
+    humidity: 'sortHumidity',
+    wind: 'sortWind',
+    precip: 'sortPrecipitation',
+    cloud: 'sortCloudCover',
+  };
+
+  // The extra ordering axes each sky-weather category makes meaningful, even
+  // though the filter constrains none of those numbers. A "Sunny" search reads
+  // best clearest-first, so cloud cover is its axis; a "Rainy" one discriminates
+  // by precipitation or wind.
+  const CATEGORY_SORT_AXES = {
+    clear: ['cloud', 'precip', 'temp'],
+    cloudy: ['cloud', 'precip'],
+    rainy: ['precip', 'wind'],
+    snowy: ['precip', 'temp'],
+    thunderstorm: ['precip', 'wind'],
+  };
+
+  /** The sort axes relevant to a filter, in the stable priority order. */
+  function relatedSortAxes(criteria) {
+    const axes = new Set();
+
+    if (criteria.tempMin !== null || criteria.tempMax !== null) axes.add('temp');
+    if (criteria.minHumidity !== null || criteria.maxHumidity !== null) axes.add('humidity');
+    if (criteria.minWind !== null) axes.add('wind');
+
+    criteria.weatherCategories.forEach((category) => {
+      (CATEGORY_SORT_AXES[category] || []).forEach((axis) => axes.add(axis));
+    });
+
+    return SORT_AXIS_PRIORITY.filter((axis) => axes.has(axis));
+  }
 
   /** Build the option list for a given filter: relevant axes first, names last. */
   function buildSortOptions(criteria) {
-    const options = SORT_DIMENSIONS.filter((dimension) => dimension.applies(criteria)).flatMap(
-      (dimension) => [
-        { value: `${dimension.key}-desc`, label: t('climate.sortHighToLow', { label: t(`climate.sort${dimension.key === 'temp' ? 'Temperature' : dimension.key === 'humidity' ? 'Humidity' : 'Wind'}`, null, dimension.label) }, `${dimension.label} (higher to lower)`) },
-        { value: `${dimension.key}-asc`, label: t('climate.sortLowToHigh', { label: t(`climate.sort${dimension.key === 'temp' ? 'Temperature' : dimension.key === 'humidity' ? 'Humidity' : 'Wind'}`, null, dimension.label) }, `${dimension.label} (lower to higher)`) },
-      ]
-    );
+    const options = relatedSortAxes(criteria).flatMap((axis) => {
+      const axisLabel = t(`climate.${SORT_AXIS_LABEL_KEY[axis]}`, null, SORT_AXES[axis].label);
+      return [
+        { value: `${axis}-desc`, label: t('climate.sortHighToLow', { label: axisLabel }, `${axisLabel} (higher to lower)`) },
+        { value: `${axis}-asc`, label: t('climate.sortLowToHigh', { label: axisLabel }, `${axisLabel} (lower to higher)`) },
+      ];
+    });
 
     // Name sorting needs no filter to justify it and no reading to resolve it,
-    // so it stays available for purely categorical filters (Sunny, Storm, ...)
+    // so it stays available for every filter.
     options.push({ value: 'name-asc', label: t('climate.sortNameAsc', null, 'City name (A-Z)') });
     options.push({ value: 'name-desc', label: t('climate.sortNameDesc', null, 'City name (Z-A)') });
 
@@ -5165,13 +5195,26 @@ ${CAMERA_PANEL_HTML}
   }
 
   /**
-   * Default selection for a freshly built option list: the leading measurement,
-   * oriented so the filter's own bounds read naturally. A ceiling-only filter
-   * (Freezing, Cold, Dry) leads with its lowest values; everything else leads
-   * with its highest, which also preserves the historical "warmest first"
-   * default for the temperature bands.
+   * Default selection for a freshly built option list, oriented so the filter
+   * reads naturally. A sky-only preset leads with the axis that matches its own
+   * vibe - a Sunny search opens clearest-first, a Cloudy one most-overcast
+   * first, and every wet preset heaviest-first. Combination presets (Beach,
+   * Ski, Tropical, ...) carry numeric bounds, so they fall through to the
+   * bound-led defaults: a ceiling-only filter (Freezing, Cold, Dry) leads with
+   * its lowest values, and everything else leads with its highest, which also
+   * preserves the historical "warmest first" default for the temperature bands.
    */
   function preferredSortValue(criteria) {
+    const numericBoundSet = criteria.tempMin !== null || criteria.tempMax !== null
+      || criteria.minHumidity !== null || criteria.maxHumidity !== null
+      || criteria.minWind !== null;
+    if (criteria.weatherCategories.size > 0 && !numericBoundSet) {
+      const category = [...criteria.weatherCategories][0];
+      if (category === 'clear') return 'cloud-asc';
+      if (category === 'cloudy') return 'cloud-desc';
+      if (category === 'rainy' || category === 'snowy' || category === 'thunderstorm') return 'precip-desc';
+    }
+
     if (criteria.tempMin !== null || criteria.tempMax !== null) {
       return hasCeilingOnly(criteria.tempMin, criteria.tempMax) ? 'temp-asc' : 'temp-desc';
     }
@@ -5216,7 +5259,7 @@ ${CAMERA_PANEL_HTML}
 
   function sortClimateEntries(entries, sortValue) {
     const [metricKey, direction] = String(sortValue || 'name-asc').split('-');
-    const metric = SORT_DIMENSIONS.find((dimension) => dimension.key === metricKey);
+    const metric = SORT_AXES[metricKey];
     const sign = direction === 'desc' ? -1 : 1;
 
     return [...entries].sort((a, b) => {

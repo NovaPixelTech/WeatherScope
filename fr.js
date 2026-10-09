@@ -62,6 +62,8 @@
     "climate.sortTemperature": "Température",
     "climate.sortHumidity": "Humidité",
     "climate.sortWind": "Vitesse du vent",
+    "climate.sortPrecipitation": "Précipitations",
+    "climate.sortCloudCover": "Couverture nuageuse",
     "climate.sortHighToLow": "{label} (de haut en bas)",
     "climate.sortLowToHigh": "{label} (du plus bas au plus haut)",
     "climate.emptyTitle": "Aucune ville de l'ensemble de données de référence {count}-city ne correspond actuellement à ces critères climatiques exacts.",

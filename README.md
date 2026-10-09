@@ -455,27 +455,32 @@ Clicking the active preset chip again clears that filter.
 
 ## 🔀 Sorting mirrors the filter
 
-The sort dropdown is **not a fixed list** — it is derived from the criteria the current filter actually constrains, so it never offers an ordering that cannot discriminate the results. Every measurement the filter touches becomes a sortable axis in **both** directions:
+The sort dropdown is **not a fixed list** — it is derived from the preset the current filter selects for, and every related axis is offered in **both** directions. Sky presets gain cloud-cover and precipitation axes (they never constrain a number), the numeric presets gain their own measurement, and combined presets gain whatever their expanded keywords imply:
 
-| Active filter | Sort options offered |
+| Active preset | Sort axes offered (besides *City name A-Z / Z-A*) |
 | --- | --- |
-| *☀️ Sunny*, *⛅ Cloudy*, *🌧️ Rainy*, *❄️ Snowy*, *⚡ Storm* (sky only, no numeric axis) | *City name (A-Z)*, *City name (Z-A)* |
-| *🧊 Freezing*, *🥶 Cold*, *🧥 Cool*, *🧣 Mild*, *🏖️ Warm*, *🌴 Hot*, `> 25`, `< 15`, `20-25` | + *Temperature (higher to lower)*, *Temperature (lower to higher)* |
-| *💧 Humid*, *🏜️ Dry* | + *Humidity (higher to lower)*, *Humidity (lower to higher)* |
-| *💨 Windy*, *🌪️ Gale* | + *Wind speed (higher to lower)*, *Wind speed (lower to higher)* |
-| *🏝️ Beach Day*, *🎿 Ski Trip*, *🌈 Rainy & Mild* | Temperature + name |
-| *🌴 Tropical* (heat **and** humidity) | Temperature **and** humidity + name |
-| *🍃 Mild & Breezy* (temperature **and** wind) | Temperature **and** wind + name |
+| *☀️ Sunny* | Cloud cover, Precipitation, Temperature |
+| *⛅ Cloudy* | Cloud cover, Precipitation |
+| *🌧️ Rainy*, *⚡ Storm* | Precipitation, Wind speed |
+| *❄️ Snowy* | Precipitation, Temperature |
+| *🧊 Freezing*, *🥶 Cold*, *🧥 Cool*, *🧣 Mild*, *🏖️ Warm*, *🌴 Hot* (+ typed `>25`, `<15`, `20-25`) | Temperature |
+| *💧 Humid*, *🏜️ Dry* | Humidity |
+| *💨 Windy*, *🌪️ Gale* | Wind speed |
+| *🏝️ Beach Day* | Temperature, Cloud cover, Precipitation |
+| *🎿 Ski Trip* | Temperature, Precipitation |
+| *🌴 Tropical* | Temperature, Humidity |
+| *🍃 Mild & Breezy* | Temperature, Wind speed |
+| *🌈 Rainy & Mild* | Temperature, Wind speed, Precipitation |
 
 Key properties:
 
 - **City name is unconditional.** Every city has a name, so `City name (A-Z)` / `(Z-A)` are always available — including for purely categorical filters like *Sunny*.
-- **The default follows the filter's own bounds.** A ceiling-only filter leads with its lowest values (*Freezing* → *Temperature (lower to higher)*, *Dry* → *Humidity (lower to higher)*); every other filter leads with its highest (*Hot* → *Temperature (higher to lower)*, *Gale* → *Wind speed (higher to higher)*).
+- **The default follows the preset's own intent.** A sky-only preset leads with the axis that matches its vibe: *Sunny* opens clearest-first (Cloud cover, low-to-high), *Cloudy* most-overcast-first, and *Rainy*, *Snowy* and *Storm* heaviest-first (Precipitation, high-to-low). A ceiling-only numeric filter (*Freezing*, *Cold*, *Dry*) leads with its lowest values; every other numeric filter leads with its highest (*Hot* → Temperature high-to-low, *Gale* → Wind speed high-to-low).
 - **An explicit choice survives.** Re-renders triggered by a °C/°F toggle or a repeat search keep the selected axis whenever it still exists; only a genuinely unavailable axis falls back to the default.
-- **Missing readings sink to the bottom** in *both* directions, so a city with no reported value can never masquerade as the coldest, hottest, wettest, or windiest entry.
+- **Missing readings sink to the bottom** in *both* directions, so a city with no reported value can never masquerade as the coldest, hottest, wettest, windiest, or cloudiest entry.
 - **Ties break by name**, so re-sorting and re-rendering never reshuffle equally-valued cards.
 
-> Sorting compares the raw Open-Meteo values, which are always Celsius / km-h / percent, so the ordering is identical in °C and °F mode.
+> Sorting compares the raw Open-Meteo values, which are always Celsius / km-h / percent / percent, so the ordering is identical in °C and °F mode.
 
 > **Scope note:** climate searches evaluate a curated set of **72 benchmark cities**, not every populated place on Earth. The results header states this explicitly, and the empty state repeats it — an empty result means "none of these 72 cities", not "nowhere on the planet".
 
