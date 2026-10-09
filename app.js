@@ -2882,7 +2882,14 @@ ${CAMERA_PANEL_HTML}
       // if the cached card is re-rendered for a different zone.
       refs.clockId = null;
 
-      const select = () => loadCityWeather(city);
+      // The dashboard's cards belong to City Search alone, so opening a matching
+      // city from the grid hands over to City Search - otherwise the six cards
+      // would have to appear inside Climate Filter, which must show only its own
+      // results.
+      const select = () => {
+        setMode('city');
+        loadCityWeather(city);
+      };
       card.addEventListener('click', select);
       card.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -6667,12 +6674,15 @@ const icon = document.createElement('span');
 
   /**
    * Modes that own the whole main area rather than sharing it with the
-   * dashboard. Compare has its own surface and Live Cameras has its own, so in
-   * both the dashboard stays down: a city that finished loading in the background
-   * must not push itself over whichever surface the visitor is actually reading.
+   * dashboard. Compare, Live Cameras and the Climate Filter each have their own
+   * surface, so in all three the dashboard stays down: a city that finished
+   * loading in the background must not push its cards - or its error - over
+   * whichever surface the visitor is actually reading. The dashboard's six
+   * cards (glance, conditions, advice, metrics, hourly, daily) are City
+   * Search's alone.
    */
   function modeOwnsMainArea(mode) {
-    return mode === 'compare' || mode === 'cameras';
+    return mode === 'compare' || mode === 'cameras' || mode === 'climate';
   }
 
   /**

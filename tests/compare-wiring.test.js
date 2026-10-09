@@ -159,6 +159,20 @@ test('the three modes are all reachable through setMode', () => {
   });
 });
 
+test('the six dashboard cards belong to City Search alone', () => {
+  const fn = appSource.match(/function modeOwnsMainArea\(mode\)\s*\{\s*return\s*([^;]+);\s*\}/);
+  assert.ok(fn, 'modeOwnsMainArea is missing');
+  for (const owned of ['compare', 'cameras', 'climate']) {
+    assert.ok(fn[1].includes(`'${owned}'`),
+      `"${owned}" must own the main area so the dashboard cards stay hidden there`);
+  }
+});
+
+test('opening a matching climate city hands over to City Search first', () => {
+  assert.match(appSource, /const select = \(\) => \{\s*setMode\('city'\);\s*loadCityWeather\(city\);\s*\}/,
+    'the climate result card must switch to City Search before loading the dashboard');
+});
+
 test('the app reads its comparison limits from the engine, not a second copy', () => {
   assert.match(appSource, /engine\.THRESHOLDS\.maxLocations/);
   assert.match(appSource, /engine\.canCompare\(/);

@@ -51,11 +51,13 @@ The mark lives in one 32×32 `viewBox` and scales without loss to any size. It i
      | Curated | *🏝️ Beach Day*, *🎿 Ski Trip*, *🌴 Tropical*, *🍃 Mild & Breezy*, *🌈 Rainy & Mild* |
    - **Curated combinations**: the five "vibe" presets expand into multiple base keywords via `CLIMATE_PRESET_EXPANSIONS` (e.g. *Beach Day* = clear skies **and** 20-28°C), so one chip expresses a whole vibe. The same keywords are echoed into the search box, so re-running the query reproduces the filter exactly.
    - **Interactive Results Grid**: Displays all matching cities around the globe with current live temperatures, weather icons, humidity, and wind speeds.
-   - **Filter-aware sorting**: the sort dropdown is rebuilt from the *active* filter, so it only ever offers axes that actually matter — see [Sorting](#-sorting-mirrors-the-filter).
-   - **Seamless Drill-Down**: Click on any city card to instantly view its detailed real-time weather conditions, 24-hour hourly forecast, and 7-day outlook.
-   - **Back Navigation**: A dedicated "Back to matching cities" bar lets you return to your filtered results anytime without losing state.
+   - **Filter-aware sorting**: the sort dropdown is rebuilt from the *preset* the active filter selects for, and every related axis is offered in both directions — see [Sorting](#-sorting-mirrors-the-filter).
+   - **Seamless Drill-Down**: Click on any city card to open its full forecast. The six dashboard cards belong to City Search alone, so the click hands over to it; the **Climate Filter** tab then drops you straight back onto the same results, without losing state.
 
 ### 📊 Comprehensive Meteorological Dashboard
+
+> The cards below — at-a-glance, city conditions, today's advice, current conditions, 24-hour and 7-day — are **City Search's**. Compare, Climate Filter and Live Cameras each show only their own surface and never these six cards.
+
 - **Current Conditions**:
   - Live temperature & "Feels like" reading.
   - Crisp day/night vector SVG icons.

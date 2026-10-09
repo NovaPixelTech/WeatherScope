@@ -964,6 +964,28 @@ test('the climate results card is hidden outside Climate Filter, including Compa
   assert.equal(cameras.classList.contains('hidden'), true);
 });
 
+test('the dashboard stays down in Climate Filter, which shows only its own section', async () => {
+  const app = bootApp(stubFetch());
+  await flush();
+
+  const dashboard = app.el('weather-dashboard');
+  const results = app.el('climate-results-section');
+
+  app.el('tab-mode-climate').click();
+  await flush();
+  assert.equal(dashboard.classList.contains('hidden'), true, 'the City Search cards must not leak into Climate Filter');
+  assert.equal(results.classList.contains('hidden'), false, 'the climate results section is the Climate Filter surface');
+
+  // A background city load landing while Climate Filter is on screen must respect
+  // the surface, not push the dashboard over it.
+  await flush();
+  assert.equal(dashboard.classList.contains('hidden'), true, 'a finished city load cannot reveal the dashboard inside Climate Filter');
+
+  app.el('tab-mode-city').click();
+  await flush();
+  assert.equal(dashboard.classList.contains('hidden'), false, 'City Search owns the six dashboard cards');
+});
+
 test('a city load that lands after the switch does not cover the comparison', async () => {
   // The default city starts loading on page load. If the visitor picks Compare
   // before it arrives, the late response must not push the dashboard - or a
