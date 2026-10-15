@@ -562,7 +562,9 @@ Both the *Popular Cities* (at the foot of the page, below `main`) and *Preset Cl
 ## 🚀 How to Run
 
 ### Method 1: Direct File Open (Easiest)
-Simply double-click [`index.html`](file:///c:/Users/giong/Antigravity%20Projects/Test_001/index.html) or open it in any web browser (Google Chrome, Microsoft Edge, Mozilla Firefox, Safari, Brave).
+Simply double-click `index.html` or open it in any web browser (Google Chrome, Microsoft Edge, Mozilla Firefox, Safari, Brave).
+
+> Every forecast feature works this way, but **accounts and favorite cities do not** — opening the file directly (`file://`) gives the app no server to talk to. For those, use Method 2 or Method 3 and open the app through `http://127.0.0.1:3000/`.
 
 ### Method 2: Local HTTP Server with PowerShell
 Run the included PowerShell script in your terminal:

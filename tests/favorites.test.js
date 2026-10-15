@@ -366,6 +366,27 @@ test('an error page that is not JSON is still classified by status', async () =>
   await assert.rejects(() => client.me('tok'), (err) => err.code === 'invalid-credentials');
 });
 
+test('a static host with no API reads as unavailable, not a server error', async () => {
+  // A plain static server (or GitHub Pages) answers a POST to an /api route it
+  // does not have with 404/405; the app must say "start the server", not
+  // "something went wrong".
+  const notFound = F.createClient({ fetchFn: recordingFetch(jsonResponse(404, {})), timeoutMs: 0 });
+  await assert.rejects(() => notFound.register('alice', 'long enough'), (err) => err.code === 'unavailable');
+
+  const methodNotAllowed = F.createClient({ fetchFn: recordingFetch(jsonResponse(405, {})), timeoutMs: 0 });
+  await assert.rejects(() => methodNotAllowed.register('alice', 'long enough'), (err) => err.code === 'unavailable');
+});
+
+test('an SPA fallback that answers 200 with HTML is unavailable, never a silent success', async () => {
+  const fetchFn = recordingFetch({
+    ok: true,
+    status: 200,
+    json: async () => { throw new Error('not json'); },
+  });
+  const client = F.createClient({ fetchFn: fetchFn, timeoutMs: 0 });
+  await assert.rejects(() => client.register('alice', 'long enough'), (err) => err.code === 'unavailable');
+});
+
 test('a bare 401 from an expired session is invalid-credentials and gets the app to sign out', async () => {
   const client = F.createClient({
     fetchFn: recordingFetch({ ok: false, status: 401, json: async () => ({}) }),

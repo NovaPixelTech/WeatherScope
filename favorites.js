@@ -327,6 +327,10 @@
     if (status === 400) return code && code !== 'invalid' ? code : 'invalid';
     if (status === 401) return code || 'invalid-credentials';
     if (status === 403) return 'unauthorized';
+    // 404/405/501 for a route this client always calls means the request never
+    // reached the WeatherScope API - a plain static host (or an SPA fallback)
+    // answered instead. That is "no server here", not "the server broke".
+    if (status === 404 || status === 405 || status === 501) return 'unavailable';
     if (status === 409) return 'username-taken';
     if (status === 429) return 'rate-limited';
     return 'server';
@@ -392,9 +396,18 @@
         payload = null;
       }
 
-      if (response.ok && payload && payload.ok !== false) return payload;
-
       const status = Number.isFinite(response.status) ? response.status : 0;
+
+      if (response.ok) {
+        if (payload && payload.ok !== false) return payload;
+        // A 2xx with no JSON envelope is not this API. The usual cause is a
+        // static/SPA host replying with the HTML app shell, so report it as a
+        // missing server rather than an opaque "server error".
+        if (!payload) {
+          throw FavoriteApiError('unavailable', status, 'Unexpected non-JSON response from the server');
+        }
+      }
+
       throw FavoriteApiError(
         mapStatus(status, payload),
         status,
