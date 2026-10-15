@@ -244,14 +244,19 @@
     sharedPayload: null,
     // Accounts & favorites. `token` is the session the account panel signed in
     // with; `favorites` is the account's saved city list, always run through the
-    // favorites engine before it is rendered. `available` records whether a
-    // server actually answered, so the UI can say "sign in" rather than
-    // "accounts are unavailable" on a plain static visit.
+    // favorites engine before it is rendered. `available` records whether
+    // accounts work at all - the Node server OR the browser-only store - so the
+    // UI can tell "sign in" from "accounts cannot work here". `backend` records
+    // which of the two owns the session, and `serverAvailable` is the health
+    // probe's answer, which decides whether a submit even tries the network.
     auth: {
       token: '',
       username: '',
       favorites: [],
       available: null, // null = not yet known, true/false once probed
+      backend: '', // '' = undecided, 'server' = Node API, 'local' = this browser
+      serverAvailable: null, // null until `api/health` answers
+      localAvailable: false, // whether this browser's store can hold an account
       busy: false,
       mode: 'signin', // 'signin' or 'register'
       lastError: '',
@@ -802,6 +807,7 @@
     accountModeSignIn: document.getElementById('account-mode-signin'),
     accountModeRegister: document.getElementById('account-mode-register'),
     accountForm: document.getElementById('account-form'),
+    accountHint: document.getElementById('account-hint'),
     authUsername: document.getElementById('auth-username'),
     authPassword: document.getElementById('auth-password'),
     authError: document.getElementById('auth-error'),
@@ -2778,17 +2784,104 @@
     return window.WeatherScopeFavorites || null;
   }
 
-  /** The API client, or null before the engine has loaded. */
-  let favoritesClient = null;
-  function getFavoritesClient() {
+  /** The Node API client, or null before the engine has loaded. */
+  let serverFavoritesClient = null;
+  function getServerFavoritesClient() {
     const engine = favoritesEngine();
     if (!engine || typeof engine.createClient !== 'function') return null;
-    if (!favoritesClient) {
-      favoritesClient = engine.createClient({
+    if (!serverFavoritesClient) {
+      serverFavoritesClient = engine.createClient({
         fetchFn: typeof window.fetch === 'function' ? window.fetch.bind(window) : null,
         baseUrl: '',
       });
     }
+    return serverFavoritesClient;
+  }
+
+  /** The browser-only account store, or null when localStorage is unusable. */
+  let localFavoritesClient = null;
+  function getLocalFavoritesClient() {
+    const engine = favoritesEngine();
+    if (!engine || typeof engine.createLocalClient !== 'function') return null;
+    if (!localFavoritesClient) {
+      let storage = null;
+      try {
+        storage = window.localStorage || null;
+      } catch (err) {
+        storage = null;
+      }
+      localFavoritesClient = engine.createLocalClient({ storage: storage });
+    }
+    return localFavoritesClient;
+  }
+
+  /** True only when this browser's store can actually hold an account. */
+  function localAccountsAvailable() {
+    const client = getLocalFavoritesClient();
+    return !!(client && client.available);
+  }
+
+  /**
+   * The account client the app talks to. It prefers the WeatherScope server,
+   * but a static host (GitHub Pages, `file://`) has no server to answer, so a
+   * new sign-up/sign-in falls through to this browser's own store. A stored
+   * session's token says which half owns it, so every later call is routed
+   * without a second guess - `local:` tokens never touch the network.
+   *
+   * Returns null only when the engine itself is missing.
+   */
+  let favoritesClient = null;
+  function getFavoritesClient() {
+    const engine = favoritesEngine();
+    if (!engine || typeof engine.createClient !== 'function') return null;
+    if (favoritesClient) return favoritesClient;
+
+    const server = getServerFavoritesClient();
+    const local = getLocalFavoritesClient();
+    const isLocalToken = typeof engine.isLocalToken === 'function'
+      ? engine.isLocalToken
+      : function () { return false; };
+
+    /** The half that owns `token` - local for `local:` sessions, else the server. */
+    function clientFor(token) {
+      if (isLocalToken(token) && local) return local;
+      return server;
+    }
+
+    /** The error code of a rejected engine call, without importing the engine. */
+    function codeOf(error) {
+      return engine.apiErrorCode(error);
+    }
+
+    /**
+     * A brand-new credential: the server answers first and is authoritative;
+     * only a host with no API at all (`unavailable`/`network`) falls through to
+     * the local store. A `username-taken` or `invalid-credentials` never does.
+     */
+    async function firstReachable(method, username, password) {
+      if (state.auth.serverAvailable === false && local) {
+        return local[method](username, password);
+      }
+      try {
+        return await server[method](username, password);
+      } catch (err) {
+        const code = codeOf(err);
+        if ((code === 'unavailable' || code === 'network') && local) {
+          return local[method](username, password);
+        }
+        throw err;
+      }
+    }
+
+    favoritesClient = {
+      isLocalToken: isLocalToken,
+      register: function (username, password) { return firstReachable('register', username, password); },
+      login: function (username, password) { return firstReachable('login', username, password); },
+      logout: function (token) { return clientFor(token).logout(token); },
+      me: function (token) { return clientFor(token).me(token); },
+      getFavorites: function (token) { return clientFor(token).getFavorites(token); },
+      saveFavorites: function (token, favorites) { return clientFor(token).saveFavorites(token, favorites); },
+    };
     return favoritesClient;
   }
 
@@ -2921,6 +3014,18 @@
       elements.authPassword.setAttribute('autocomplete', registering ? 'new-password' : 'current-password');
     }
 
+    // The promise made by the hint depends on where favorites actually live: a
+    // server account follows the person, a local one only this browser. A probe
+    // still in flight (`null`) is not treated as "no server", so a server-hosted
+    // app never flashes the browser-only wording before the answer arrives.
+    const localOnly = auth.backend === 'local'
+      || (auth.serverAvailable === false && localAccountsAvailable());
+    if (elements.accountHint) {
+      elements.accountHint.textContent = localOnly
+        ? t('account.hintLocal', null, 'Create an account to keep your favorite cities in this browser.')
+        : t('account.hint', null, 'Sign in to save your favorite cities and reach them quickly on any device.');
+    }
+
     if (elements.authError) {
       if (auth.lastError) {
         elements.authError.textContent = auth.lastError;
@@ -2931,13 +3036,19 @@
       }
     }
 
+    // The note explains the mode, but only when there is something to explain:
+    // "no server and no local store" is a failure, "local store" is a caveat.
+    let noteKey = '';
+    if (auth.available === false && !localAccountsAvailable()) {
+      noteKey = 'account.serverRequired';
+    } else if (localOnly) {
+      noteKey = 'account.localNote';
+    }
     if (elements.authNote) {
-      if (auth.available === false) {
-        elements.authNote.textContent = t(
-          'account.serverRequired',
-          null,
-          'Accounts and favorites need the WeatherScope server. Start it with "node server.js" and open the app through it.'
-        );
+      if (noteKey) {
+        elements.authNote.textContent = t(noteKey, null, noteKey === 'account.localNote'
+          ? 'Saved in this browser only - your favorites will not follow you to other devices.'
+          : 'Accounts and favorites need the WeatherScope server. Start it with "node server.js" and open the app through it.');
         elements.authNote.classList.remove('hidden');
       } else {
         elements.authNote.textContent = '';
@@ -3076,6 +3187,10 @@
   async function initAuth() {
     const client = getFavoritesClient();
     const stored = readStoredSession();
+    // The local store works with no server at all (localStorage permitting), so
+    // it is the floor: accounts are only truly unavailable when even it is gone.
+    const localAvailable = localAccountsAvailable();
+    state.auth.localAvailable = localAvailable;
 
     if (!client) {
       state.auth.available = false;
@@ -3086,29 +3201,37 @@
     }
 
     if (!stored) {
-      // No session yet: still probe, so the panel can say "server needed" before
-      // the visitor has typed anything, but never block the first paint on it.
+      // No session yet: paint immediately with what the local store guarantees,
+      // then probe the server without blocking the first frame.
+      state.auth.available = localAvailable;
       renderAccountUI();
       renderFavoritesBar();
       updateFavoriteButton();
       try {
         const health = await fetch('api/health', { headers: { Accept: 'application/json' } });
-        state.auth.available = health.ok;
+        state.auth.serverAvailable = !!health.ok;
       } catch (err) {
-        state.auth.available = false;
+        state.auth.serverAvailable = false;
       }
+      state.auth.available = state.auth.serverAvailable || localAvailable;
+      if (!state.auth.serverAvailable && localAvailable) state.auth.backend = 'local';
       renderAccountUI();
       return;
     }
 
+    const isLocal = client.isLocalToken(stored.token);
+    state.auth.backend = isLocal ? 'local' : 'server';
+    state.auth.serverAvailable = isLocal ? false : state.auth.serverAvailable;
     state.auth.token = stored.token;
     state.auth.username = stored.username;
+    state.auth.available = true;
     renderAccountUI();
     updateFavoriteButton();
 
     try {
       const account = await client.me(stored.token);
       state.auth.available = true;
+      if (!isLocal) state.auth.serverAvailable = true;
       state.auth.username = account.username || stored.username;
       writeStoredSession({ token: state.auth.token, username: state.auth.username });
       applyFavorites(account.favorites);
@@ -3119,8 +3242,12 @@
         // The session is genuinely dead: forget it and start clean.
         signOutLocally();
       } else {
-        // A network problem or a sleeping server must not sign anyone out.
-        state.auth.available = code === 'network' || code === 'unavailable' ? false : state.auth.available;
+        // A network problem or a sleeping server must not sign anyone out; the
+        // local store can still carry accounts, so availability does not drop.
+        state.auth.available = (code === 'network' || code === 'unavailable')
+          ? localAvailable
+          : state.auth.available;
+        if (!state.auth.available && localAvailable) state.auth.backend = 'local';
       }
       renderAccountUI();
     }
@@ -3161,6 +3288,10 @@
       state.auth.busy = false;
       state.auth.token = result.token;
       state.auth.username = result.username || username;
+      // The token says which half answered, so every later favorites call is
+      // routed without re-probing the network.
+      state.auth.backend = client.isLocalToken(result.token) ? 'local' : 'server';
+      if (state.auth.backend === 'server') state.auth.serverAvailable = true;
       state.auth.lastError = '';
       writeStoredSession({ token: state.auth.token, username: state.auth.username });
 

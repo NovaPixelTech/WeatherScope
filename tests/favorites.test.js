@@ -524,3 +524,143 @@ test('apiErrorCode falls back to server for anything unrecognised', () => {
   assert.equal(F.apiErrorCode(null), 'server');
   assert.equal(F.apiErrorCode(new Error('plain')), 'server');
 });
+
+// ==========================================================================
+// 8. The local (browser-only) account client
+// ==========================================================================
+/** A Map-backed storage, exactly the three methods the client asks for. */
+function memoryStorage(seed) {
+  const map = new Map(seed ? Object.entries(seed) : []);
+  return {
+    map: map,
+    getItem: (key) => (map.has(key) ? map.get(key) : null),
+    setItem: (key, value) => map.set(key, String(value)),
+    removeItem: (key) => map.delete(key),
+  };
+}
+
+/**
+ * A deterministic, fast stand-in for PBKDF2. It is a real one-way-ish mix (the
+ * plaintext never appears in the output), so the "no plaintext in storage"
+ * assertions stay meaningful without paying for 100k iterations per test.
+ */
+function fakeHasher(password, salt) {
+  let h = 0;
+  const text = String(salt) + '\u0000' + String(password);
+  for (let i = 0; i < text.length; i += 1) h = (Math.imul(h, 31) + text.charCodeAt(i)) >>> 0;
+  return { hash: 'h' + h.toString(16), algo: 'test' };
+}
+
+function localClient(storage) {
+  return F.createLocalClient({
+    storage: storage,
+    hasher: fakeHasher,
+    now: () => 1234,
+    randomSalt: () => 'salt-fixed',
+  });
+}
+
+test('the local client exposes the same contract as the API client', () => {
+  const client = localClient(memoryStorage());
+  ['register', 'login', 'logout', 'me', 'getFavorites', 'saveFavorites'].forEach((method) => {
+    assert.equal(typeof client[method], 'function', `local client is missing ${method}`);
+  });
+  assert.equal(client.available, true);
+  assert.equal(F.isLocalToken('local:alice'), true);
+  assert.equal(F.isLocalToken('deadbeef'), false);
+});
+
+test('a local account is created, signed in and remembered', async () => {
+  const storage = memoryStorage();
+  const client = localClient(storage);
+
+  const created = await client.register('Alice', 'long enough password');
+  assert.equal(created.username, 'Alice');
+  assert.equal(F.isLocalToken(created.token), true);
+  assert.deepEqual(created.favorites, []);
+
+  // Case-insensitive sign-in, same as the server.
+  const signedIn = await client.login('alice', 'long enough password');
+  assert.equal(signedIn.username, 'Alice');
+  assert.equal(signedIn.token, created.token);
+
+  const me = await client.me(created.token);
+  assert.equal(me.username, 'Alice');
+
+  // The password itself is never stored - only a salt and a derived hash.
+  const raw = storage.map.get(F.LOCAL_ACCOUNTS_KEY);
+  assert.ok(raw.indexOf('long enough password') === -1, 'the password leaked into storage');
+  assert.ok(raw.indexOf('salt-fixed') !== -1, 'the salt should be stored');
+});
+
+test('a second local account with the same name is refused', async () => {
+  const client = localClient(memoryStorage());
+  await client.register('Alice', 'long enough password');
+  await assert.rejects(() => client.register('alice', 'another password'), (err) => err.code === 'username-taken');
+});
+
+test('a wrong local password is invalid-credentials, never a silent pass', async () => {
+  const client = localClient(memoryStorage());
+  const created = await client.register('Alice', 'long enough password');
+  await assert.rejects(() => client.login('Alice', 'the wrong password!!'), (err) => err.code === 'invalid-credentials');
+  await assert.rejects(() => client.login('Ghost', 'long enough password'), (err) => err.code === 'invalid-credentials');
+  // The failed attempts must not have broken the real session.
+  const me = await client.me(created.token);
+  assert.equal(me.username, 'Alice');
+});
+
+test('local favorites round-trip through saveFavorites, sanitized', async () => {
+  const client = localClient(memoryStorage());
+  const created = await client.register('Alice', 'long enough password');
+
+  const saved = await client.saveFavorites(created.token, [
+    { name: 'Paris', latitude: 48.8566, longitude: 2.3522 },
+    { name: 'Hostile', latitude: 999, longitude: 999 },
+    { name: 'Paris again', latitude: 48.8566, longitude: 2.3522 },
+  ]);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].name, 'Paris');
+
+  assert.deepEqual(await client.getFavorites(created.token), saved);
+  assert.deepEqual((await client.me(created.token)).favorites, saved);
+});
+
+test('a token that names no local account is unauthorized', async () => {
+  const client = localClient(memoryStorage());
+  await assert.rejects(() => client.me('local:Ghost'), (err) => err.code === 'unauthorized');
+  await assert.rejects(() => client.getFavorites('local:Ghost'), (err) => err.code === 'unauthorized');
+  await assert.rejects(() => client.saveFavorites('local:Ghost', []), (err) => err.code === 'unauthorized');
+  await assert.rejects(() => client.me('not-a-local-token'), (err) => err.code === 'unauthorized');
+});
+
+test('the local client validates locally and reports it is unusable without storage', async () => {
+  const client = localClient(memoryStorage());
+  await assert.rejects(() => client.register('ab', 'long enough password'), (err) => err.code === 'usernameLength');
+  await assert.rejects(() => client.register('Alice', 'short'), (err) => err.code === 'passwordTooShort');
+
+  const dead = F.createLocalClient({ storage: null, hasher: fakeHasher });
+  assert.equal(dead.available, false);
+  await assert.rejects(() => dead.register('Alice', 'long enough password'), (err) => err.code === 'unavailable');
+});
+
+test('a corrupt local store is discarded rather than thrown', async () => {
+  const storage = memoryStorage({ [F.LOCAL_ACCOUNTS_KEY]: '{ not json' });
+  const client = localClient(storage);
+  const created = await client.register('Alice', 'long enough password');
+  assert.equal(created.username, 'Alice');
+  assert.equal((await client.login('Alice', 'long enough password')).username, 'Alice');
+});
+
+test('the default hasher never writes the plaintext password, and can still verify it', async () => {
+  const storage = memoryStorage();
+  const client = F.createLocalClient({ storage: storage, randomSalt: () => 'fixed-salt' });
+
+  await client.register('Alice', 'hunter2-but-long');
+  const raw = storage.map.get(F.LOCAL_ACCOUNTS_KEY);
+  assert.ok(raw.indexOf('hunter2-but-long') === -1, 'the plaintext password reached storage');
+
+  const record = JSON.parse(raw).users.alice;
+  assert.ok(['pbkdf2', 'weak'].indexOf(record.algo) !== -1, 'an unexpected hash method was recorded');
+  assert.equal((await client.login('Alice', 'hunter2-but-long')).username, 'Alice');
+  await assert.rejects(() => client.login('Alice', 'not-the-password'), (err) => err.code === 'invalid-credentials');
+});

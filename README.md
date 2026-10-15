@@ -264,7 +264,18 @@ Sign in and the cities you care about follow you: one click saves the city you a
 - **Up to 24 cities.** The bar is hidden until you save one, and it does not appear in Climate Filter, whose own chip bar replaces it.
 - **Every control is a real control.** The star exposes `aria-pressed`, the chip name and the remove button carry `aria-label`s, and every outcome is announced through a polite live region.
 
-### How accounts work
+### Where the account lives: server or browser
+
+The app can keep your account in one of two places, and it picks automatically:
+
+| Host | Backend | Favorites follow you… |
+| --- | --- | --- |
+| `node server.js` (or `start-server.ps1`) | The WeatherScope **server** | …to any device you sign in on. |
+| GitHub Pages, `file://`, a static-only server | The **browser** (`localStorage`) | …only on this device and browser. |
+
+On a static host a `POST` to `/api/*` is simply a 404 — GitHub Pages cannot run `server.js` — so the app falls back to a **browser-only account**, stored under `weatherscope_accounts` in `localStorage`. Creating an account and signing in work immediately; the account panel says plainly that the list stays on this device, and its promise changes from "reach them on any device" to "keep them in this browser".
+
+### How the server accounts work
 
 | Layer | Choice | Why |
 | --- | --- | --- |
@@ -274,11 +285,13 @@ Sign in and the cities you care about follow you: one click saves the city you a
 | Rate limiting | Per-IP on register and login | A password cannot be brute-forced at line speed. |
 | Storage | Atomic writes to `data/users.json`, a corrupt file quarantined | A killed process never leaves a half-written account file. |
 
-Validation is the **same `favorites.js` engine on both sides** — the browser loads it as a global and the server `require`s it — so a username or city one side accepts is exactly what the other accepts. A saved city's identity is its **coordinates** (to four decimals), not its name, so a hand-edited request cannot save the same place twice.
+The browser store salts and hashes the password too (**PBKDF2-SHA256** where Web Crypto exists), so a plaintext password is never written — but it is **not** a security boundary: any script on the same origin can read `localStorage`. It exists so favorites still work where no server can run, not to protect secrets.
 
-### Running it
+Validation is the **same `favorites.js` engine whether the account is on the server or in the browser** — the client and `server.js` both `require`/load it — so a username or city one side accepts is exactly what the other accepts. A saved city's identity is its **coordinates** (to four decimals), not its name, so a hand-edited request cannot save the same place twice.
 
-Accounts and favorites need the small zero-dependency Node server, which serves the static app **and** the API:
+### Running the server
+
+Accounts that follow you across devices need the small zero-dependency Node server, which serves the static app **and** the API:
 
 ```bash
 node server.js        # http://127.0.0.1:3000/  (env: PORT, HOST, WEATHERSCOPE_DATA)
@@ -290,7 +303,7 @@ node server.js        # http://127.0.0.1:3000/  (env: PORT, HOST, WEATHERSCOPE_D
 powershell -ExecutionPolicy Bypass -File .\start-server.ps1
 ```
 
-Opened as a plain file (`file://`), or through the static-only fallback when Node is absent, the app still works — only the account panel says that sign-in needs the server.
+Opened as a plain file (`file://`) or served by GitHub Pages, the app still works and accounts fall back to the browser-only store described above.
 
 ### API
 
@@ -564,7 +577,7 @@ Both the *Popular Cities* (at the foot of the page, below `main`) and *Preset Cl
 ### Method 1: Direct File Open (Easiest)
 Simply double-click `index.html` or open it in any web browser (Google Chrome, Microsoft Edge, Mozilla Firefox, Safari, Brave).
 
-> Every forecast feature works this way, but **accounts and favorite cities do not** — opening the file directly (`file://`) gives the app no server to talk to. For those, use Method 2 or Method 3 and open the app through `http://127.0.0.1:3000/`.
+> Everything works this way, but with no server to talk to, accounts fall back to a **browser-only** store: your favorites work on this device and this browser, not across devices. For accounts that follow you, use Method 2 or Method 3 and open the app through `http://127.0.0.1:3000/`. The same applies when the app is hosted on **GitHub Pages**.
 
 ### Method 2: Local HTTP Server with PowerShell
 Run the included PowerShell script in your terminal:

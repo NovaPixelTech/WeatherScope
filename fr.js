@@ -275,6 +275,8 @@
     "account.close": "Fermer le panneau du compte",
     "account.modeAria": "Action du compte",
     "account.hint": "Connectez-vous pour enregistrer vos villes favorites et les retrouver rapidement sur n'importe quel appareil.",
+    "account.hintLocal": "Créez un compte pour conserver vos villes favorites dans ce navigateur.",
+    "account.localNote": "Enregistrés dans ce navigateur uniquement : vos favoris ne vous suivront pas sur d'autres appareils.",
     "account.username": "Nom d'utilisateur",
     "account.password": "Mot de passe",
     "account.signOut": "Se déconnecter",

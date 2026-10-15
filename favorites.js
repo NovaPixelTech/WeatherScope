@@ -46,6 +46,13 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
+  // The host object, reached from inside the factory too: the local account
+  // store is the one place that needs `localStorage` and Web Crypto, and it is
+  // resolved defensively so the module still loads in a bare sandbox.
+  const globalObject = typeof globalThis !== 'undefined'
+    ? globalThis
+    : (typeof self !== 'undefined' ? self : (typeof window !== 'undefined' ? window : null));
+
   // ==========================================================================
   // Limits - the single place these are defined, for the client and the server
   // ==========================================================================
@@ -485,6 +492,240 @@
     };
   }
 
+  // ==========================================================================
+  // The local half - a same-browser account store
+  // ==========================================================================
+  // A static host (GitHub Pages, `file://`) can serve the whole app but can
+  // never run `server.js`, so there is no `/api` to sign in against. Rather than
+  // leave the account panel dead, the app falls back to this store: the same
+  // username/password/favorites contract, kept in `localStorage` on the one
+  // device. It is deliberately honest about being local - a password is salted
+  // and hashed (PBKDF2 where Web Crypto exists) so a plaintext password is never
+  // written, but it is *not* a security boundary: any script on the origin can
+  // read `localStorage`. It exists so favorites still work offline of any server.
+
+  /** The `localStorage` key the browser-only account store lives under. */
+  const LOCAL_ACCOUNTS_KEY = 'weatherscope_accounts';
+
+  /** Local sessions are told apart from server tokens by this prefix. */
+  const LOCAL_SESSION_PREFIX = 'local:';
+
+  /** True when `token` names a local (browser-only) session rather than a server one. */
+  function isLocalToken(token) {
+    return typeof token === 'string' && token.indexOf(LOCAL_SESSION_PREFIX) === 0;
+  }
+
+  function defaultLocalStorage() {
+    try {
+      const store = globalObject && globalObject.localStorage;
+      if (store && typeof store.getItem === 'function' && typeof store.setItem === 'function') {
+        return store;
+      }
+    } catch (err) {
+      // Access throws in a sandboxed iframe or a locked-down browser: no store.
+    }
+    return null;
+  }
+
+  function toHex(bytes) {
+    let out = '';
+    for (let i = 0; i < bytes.length; i += 1) {
+      out += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
+    }
+    return out;
+  }
+
+  /** A salted fallback used only where Web Crypto is missing. Never plaintext. */
+  function weakHash(text) {
+    let h1 = 0x811c9dc5;
+    let h2 = 0x01000193;
+    for (let i = 0; i < text.length; i += 1) {
+      const c = text.charCodeAt(i);
+      h1 = Math.imul(h1 ^ c, 16777619) >>> 0;
+      h2 = Math.imul(h2 + c, 2654435761) >>> 0;
+    }
+    return (h1 >>> 0).toString(16) + (h2 >>> 0).toString(16);
+  }
+
+  function subtleCrypto() {
+    try {
+      const c = globalObject && globalObject.crypto;
+      if (c && c.subtle && typeof c.subtle.deriveBits === 'function' && typeof c.subtle.importKey === 'function') {
+        return c.subtle;
+      }
+    } catch (err) {
+      // Ignore and fall back to the weak hash.
+    }
+    return null;
+  }
+
+  /**
+   * The default password hasher: PBKDF2-SHA256 (100k iterations) when Web Crypto
+   * is present, else the salted fallback. Returns `{ hash, algo }` so a record
+   * can be verified with the same method that produced it.
+   */
+  async function defaultHasher(password, salt, algo) {
+    const subtle = algo === 'weak' ? null : subtleCrypto();
+    const Encoder = globalObject && globalObject.TextEncoder;
+    if (subtle && typeof Encoder === 'function') {
+      const encoder = new Encoder();
+      const key = await subtle.importKey('raw', encoder.encode(String(password)), { name: 'PBKDF2' }, false, ['deriveBits']);
+      const bits = await subtle.deriveBits(
+        { name: 'PBKDF2', salt: encoder.encode(String(salt)), iterations: 100000, hash: 'SHA-256' },
+        key,
+        256
+      );
+      return { hash: toHex(new Uint8Array(bits)), algo: 'pbkdf2' };
+    }
+    return { hash: weakHash(String(salt) + '\u0000' + String(password) + '\u0000' + String(salt)), algo: 'weak' };
+  }
+
+  function defaultSalt() {
+    try {
+      const c = globalObject && globalObject.crypto;
+      if (c && typeof c.getRandomValues === 'function') {
+        const bytes = new Uint8Array(16);
+        c.getRandomValues(bytes);
+        return toHex(bytes);
+      }
+    } catch (err) {
+      // Fall through to a time-based salt.
+    }
+    return 's' + Date.now().toString(36) + Math.floor(Math.random() * 1e9).toString(36);
+  }
+
+  /**
+   * Builds the browser-only account client. It exposes exactly the methods the
+   * API client does (`register`, `login`, `logout`, `me`, `getFavorites`,
+   * `saveFavorites`), so the app can route to either one without caring which.
+   * `storage`, `hasher`, `now` and `randomSalt` are injectable for tests.
+   */
+  function createLocalClient(options) {
+    const opts = options || {};
+    const storage = opts.storage !== undefined ? opts.storage : defaultLocalStorage();
+    const accountsKey = asString(opts.accountsKey) || LOCAL_ACCOUNTS_KEY;
+    const now = typeof opts.now === 'function' ? opts.now : function () { return Date.now(); };
+    const randomSalt = typeof opts.randomSalt === 'function' ? opts.randomSalt : defaultSalt;
+    const hasher = typeof opts.hasher === 'function' ? opts.hasher : defaultHasher;
+
+    function readStore() {
+      if (!storage || typeof storage.getItem !== 'function') return { v: 1, users: {} };
+      let parsed = null;
+      try {
+        const raw = storage.getItem(accountsKey);
+        if (raw) parsed = JSON.parse(raw);
+      } catch (err) {
+        parsed = null;
+      }
+      if (!parsed || typeof parsed !== 'object' || typeof parsed.users !== 'object' || parsed.users === null) {
+        return { v: 1, users: {} };
+      }
+      return { v: 1, users: parsed.users };
+    }
+
+    function writeStore(store) {
+      if (!storage || typeof storage.setItem !== 'function') {
+        throw FavoriteApiError('unavailable', 0, 'No local storage is available');
+      }
+      store.v = 1;
+      storage.setItem(accountsKey, JSON.stringify(store));
+    }
+
+    function keyOf(username) {
+      return String(username).trim().toLowerCase();
+    }
+
+    function findUser(store, username) {
+      const key = keyOf(username);
+      return Object.prototype.hasOwnProperty.call(store.users, key) ? store.users[key] : null;
+    }
+
+    async function derive(password, salt, algo) {
+      const result = await hasher(password, salt, algo);
+      if (typeof result === 'string') return { hash: result, algo: algo || 'custom' };
+      return {
+        hash: asString(result && result.hash),
+        algo: asString(result && result.algo) || algo || 'custom',
+      };
+    }
+
+    /** The stored record a token names, or a thrown `unauthorized`. */
+    function recordFor(token) {
+      const store = readStore();
+      const record = isLocalToken(token) ? findUser(store, token.slice(LOCAL_SESSION_PREFIX.length)) : null;
+      if (!record) throw FavoriteApiError('unauthorized', 0, 'No local session');
+      return { store: store, record: record };
+    }
+
+    return {
+      isLocal: true,
+      backend: 'local',
+      // False when this browser refuses `localStorage` (private mode, a sandbox):
+      // the client still exists, but no account can actually be kept.
+      available: !!(storage
+        && typeof storage.getItem === 'function'
+        && typeof storage.setItem === 'function'
+        && typeof storage.removeItem === 'function'),
+
+      async register(username, password) {
+        const credentials = validateCredentials({ username: username, password: password });
+        if (!credentials.valid) throw FavoriteApiError(credentials.reason, 0, credentials.reason);
+        const store = readStore();
+        if (findUser(store, credentials.username)) {
+          throw FavoriteApiError('username-taken', 0, 'That username is already taken on this device');
+        }
+        const salt = String(randomSalt());
+        const derived = await derive(credentials.password, salt, undefined);
+        const record = {
+          username: credentials.username,
+          salt: salt,
+          hash: derived.hash,
+          algo: derived.algo,
+          createdAt: now(),
+          favorites: [],
+        };
+        store.users[keyOf(credentials.username)] = record;
+        writeStore(store);
+        return { token: LOCAL_SESSION_PREFIX + record.username, username: record.username, favorites: [] };
+      },
+
+      async login(username, password) {
+        const credentials = validateCredentials({ username: username, password: password });
+        if (!credentials.valid) throw FavoriteApiError(credentials.reason, 0, credentials.reason);
+        const record = findUser(readStore(), credentials.username);
+        if (!record) throw FavoriteApiError('invalid-credentials', 0, 'No such account on this device');
+        const derived = await derive(credentials.password, record.salt, record.algo);
+        if (derived.hash !== record.hash) throw FavoriteApiError('invalid-credentials', 0, 'That password does not match');
+        return {
+          token: LOCAL_SESSION_PREFIX + record.username,
+          username: record.username,
+          favorites: sanitizeFavorites(record.favorites),
+        };
+      },
+
+      async logout() {
+        // A local session lives only in the app's own storage key, which the
+        // caller clears; there is nothing here to revoke.
+      },
+
+      async me(token) {
+        const found = recordFor(token);
+        return { username: found.record.username, favorites: sanitizeFavorites(found.record.favorites) };
+      },
+
+      async getFavorites(token) {
+        return sanitizeFavorites(recordFor(token).record.favorites);
+      },
+
+      async saveFavorites(token, favorites) {
+        const found = recordFor(token);
+        found.record.favorites = sanitizeFavorites(favorites);
+        writeStore(found.store);
+        return found.record.favorites;
+      },
+    };
+  }
+
   return {
     MAX_FAVORITES: MAX_FAVORITES,
     COORD_PRECISION: COORD_PRECISION,
@@ -509,5 +750,9 @@
     validatePassword: validatePassword,
     validateCredentials: validateCredentials,
     createClient: createClient,
+    createLocalClient: createLocalClient,
+    isLocalToken: isLocalToken,
+    LOCAL_ACCOUNTS_KEY: LOCAL_ACCOUNTS_KEY,
+    LOCAL_SESSION_PREFIX: LOCAL_SESSION_PREFIX,
   };
 });

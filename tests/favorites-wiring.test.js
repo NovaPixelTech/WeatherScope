@@ -52,6 +52,32 @@ test('favorites.js registers itself as a browser global for the app to use', () 
   assert.equal(typeof Favorites.createClient, 'function');
   assert.equal(typeof Favorites.isFavorite, 'function');
   assert.equal(typeof Favorites.cityKey, 'function');
+  // The browser-only store ships with the same global, so a static host can
+  // still offer accounts.
+  assert.equal(typeof Favorites.createLocalClient, 'function');
+  assert.equal(typeof Favorites.isLocalToken, 'function');
+});
+
+test('the app falls back to the local store when no API answers', () => {
+  // The router is what makes GitHub Pages usable: a `local:` session is routed
+  // to the browser store, and a fresh sign-up only falls through on a host with
+  // no API at all (unavailable/network), never on a real rejected credential.
+  const block = appSource.slice(
+    appSource.indexOf('function getServerFavoritesClient()'),
+    appSource.indexOf('function readStoredSession()')
+  );
+  assert.ok(block.length > 0, 'getFavoritesClient was not found');
+  assert.match(block, /createLocalClient/, 'the app never builds a local client');
+  assert.match(block, /isLocalToken/, 'the router does not tell local sessions apart');
+  assert.match(block, /'unavailable'/, 'the fallback never triggers on a missing API');
+  assert.match(block, /'network'/, 'the fallback never triggers on a dead network');
+});
+
+test('the panel explains a browser-only account instead of a dead end', () => {
+  assert.match(appSource, /account\.localNote/, 'the local-only caveat is never shown');
+  assert.match(appSource, /account\.hintLocal/, 'the hint still promises other devices');
+  assert.equal(typeof I18n.translations.en['account.localNote'], 'string');
+  assert.equal(typeof I18n.translations.en['account.hintLocal'], 'string');
 });
 
 test('favorites.js is loaded before app.js so the global exists at init', () => {
