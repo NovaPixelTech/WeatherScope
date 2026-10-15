@@ -653,6 +653,8 @@ body {
   max-width: 100%;
   flex-wrap: wrap;
   justify-content: flex-end;
+  /* Anchor for the account panel popover, which is its last child. */
+  position: relative;
 }
 
 .language-picker-label {
@@ -1418,6 +1420,338 @@ body {
     gap: 8px;
   }
   .camera-toggle { font-size: 0.74rem; padding: 5px 10px; }
+}
+
+/* ==========================================================================
+   Accounts & favorite cities
+   --------------------------------------------------------------------------
+   The account button sits in the header; the panel is a non-modal popover
+   anchored to the header controls. The favorites bar mirrors the popular/
+   climate chip bars, but its chips carry a star and a remove control, so it
+   lays out as a wrapping row rather than a fixed matrix.
+   ========================================================================== */
+
+/* --- Account button in the header ---------------------------------------- */
+.account-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(220px, 42vw);
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(11, 19, 36, 0.85);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.account-btn svg {
+  flex-shrink: 0;
+}
+
+.account-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-btn:hover {
+  background: rgba(24, 40, 74, 0.9);
+  color: var(--text-primary);
+}
+
+.account-btn:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.account-btn.is-signed-in {
+  color: var(--text-primary);
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+/* --- Account panel popover ----------------------------------------------- */
+.account-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 120;
+  width: min(340px, calc(100vw - 32px));
+  padding: 18px;
+  background: #0b1328;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: var(--radius-md);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.75);
+}
+
+.account-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.account-panel-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.account-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.account-close-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.account-close-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+}
+
+.account-close-btn:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.account-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.account-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.account-mode-switch {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  background: rgba(9, 16, 32, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-full);
+}
+
+.account-mode-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.account-mode-btn:hover {
+  color: var(--text-primary);
+}
+
+.account-mode-btn:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.account-mode-btn.active {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+}
+
+.account-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.account-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.account-field-label {
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.account-field input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: var(--radius-sm);
+  background: rgba(9, 16, 32, 0.85);
+  color: #ffffff;
+  font: 600 0.86rem var(--font-family);
+}
+
+.account-field input:focus-visible {
+  outline: 3px solid var(--card-border-focus);
+  outline-offset: 1px;
+}
+
+.account-error {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent-rose);
+}
+
+.account-note {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--accent-yellow);
+}
+
+.account-submit-btn,
+.account-signout-btn {
+  margin-top: 0;
+  width: 100%;
+}
+
+.account-welcome {
+  margin: 0;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.account-count {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+/* --- Favorites bar ------------------------------------------------------- */
+.favorites-bar {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  column-gap: 16px;
+  row-gap: 10px;
+}
+
+/* Overrides the fixed 5-column matrix: favorites are an open-ended list, so
+   they wrap instead. */
+.favorites-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.favorite-chip {
+  display: inline-flex;
+  align-items: stretch;
+  max-width: 100%;
+  background: rgba(13, 22, 41, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.favorite-chip:hover {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 4px 12px rgba(56, 189, 248, 0.25);
+}
+
+.favorite-chip-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 38px;
+  padding: 0 6px 0 14px;
+  border: none;
+  background: transparent;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.favorite-chip-main:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: -2px;
+}
+
+.favorite-chip-star {
+  color: var(--accent-yellow);
+}
+
+.favorite-chip-name {
+  max-width: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.favorite-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.favorite-chip-remove:hover {
+  background: rgba(244, 63, 94, 0.35);
+  color: #ffffff;
+}
+
+.favorite-chip-remove:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: -2px;
+}
+
+/* The hero star lights up once the shown city is saved. */
+.favorite-btn.is-favorite {
+  color: var(--accent-yellow);
+  border-color: rgba(250, 204, 21, 0.55);
+  background: rgba(250, 204, 21, 0.16);
+}
+
+.favorite-btn.is-favorite svg {
+  fill: currentColor;
 }
 
 /* Empty state within climate results */

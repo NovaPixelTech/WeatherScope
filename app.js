@@ -242,6 +242,22 @@
     // visit. It is kept only while it still describes what is on screen: picking
     // another city drops it (see `loadCityWeather`).
     sharedPayload: null,
+    // Accounts & favorites. `token` is the session the account panel signed in
+    // with; `favorites` is the account's saved city list, always run through the
+    // favorites engine before it is rendered. `available` records whether a
+    // server actually answered, so the UI can say "sign in" rather than
+    // "accounts are unavailable" on a plain static visit.
+    auth: {
+      token: '',
+      username: '',
+      favorites: [],
+      available: null, // null = not yet known, true/false once probed
+      busy: false,
+      mode: 'signin', // 'signin' or 'register'
+      lastError: '',
+    },
+    // Guards a stale favorites write from landing after a newer one.
+    favoritesSeq: 0,
   };
 
   const THEME_CLASSES = [
@@ -774,6 +790,30 @@
     sharedBannerCards: document.getElementById('shared-banner-cards'),
     sharedClearBtn: document.getElementById('shared-clear-btn'),
     shareStatus: document.getElementById('share-status'),
+
+    // Account & favorite cities
+    accountBtn: document.getElementById('account-btn'),
+    accountBtnLabel: document.getElementById('account-btn-label'),
+    accountPanel: document.getElementById('account-panel'),
+    accountPanelTitle: document.getElementById('account-panel-title'),
+    accountCloseBtn: document.getElementById('account-close-btn'),
+    accountSignedOut: document.getElementById('account-signed-out'),
+    accountSignedIn: document.getElementById('account-signed-in'),
+    accountModeSignIn: document.getElementById('account-mode-signin'),
+    accountModeRegister: document.getElementById('account-mode-register'),
+    accountForm: document.getElementById('account-form'),
+    authUsername: document.getElementById('auth-username'),
+    authPassword: document.getElementById('auth-password'),
+    authError: document.getElementById('auth-error'),
+    authSubmitBtn: document.getElementById('auth-submit-btn'),
+    authNote: document.getElementById('auth-note'),
+    accountWelcome: document.getElementById('account-welcome'),
+    accountFavCount: document.getElementById('account-fav-count'),
+    accountSignOutBtn: document.getElementById('account-signout-btn'),
+    favoritesBar: document.getElementById('favorites-bar'),
+    favoritesChips: document.getElementById('favorites-chips'),
+    favoritesStatus: document.getElementById('favorites-status'),
+    favoriteBtn: document.getElementById('favorite-btn'),
 
     cityName: document.getElementById('city-name'),
     locationMeta: document.getElementById('location-meta'),
@@ -2719,8 +2759,531 @@
   }
 
 // ==========================================================================
-// Climate Search Results Rendering
+// Accounts & favorite cities
+// --------------------------------------------------------------------------
+// Favorites are stored on the account, not in this browser, so that the same
+// person sees the same cities on every device. That needs the WeatherScope
+// server (`node server.js`); when the app is opened as a plain static file the
+// engine half still loads, but the account panel explains, once, that there is
+// nothing to sign in to - rather than failing silently.
+//
+// The session token is the only thing kept locally, and it is kept apart from
+// the rename-migrated keys: accounts did not exist before the rename, so there
+// is nothing to migrate.
 // ==========================================================================
+  const AUTH_STORAGE_KEY = 'weatherscope_auth';
+  const FAVORITES_MAX = 24;
+
+  function favoritesEngine() {
+    return window.WeatherScopeFavorites || null;
+  }
+
+  /** The API client, or null before the engine has loaded. */
+  let favoritesClient = null;
+  function getFavoritesClient() {
+    const engine = favoritesEngine();
+    if (!engine || typeof engine.createClient !== 'function') return null;
+    if (!favoritesClient) {
+      favoritesClient = engine.createClient({
+        fetchFn: typeof window.fetch === 'function' ? window.fetch.bind(window) : null,
+        baseUrl: '',
+      });
+    }
+    return favoritesClient;
+  }
+
+  /** Reads the stored session, or null. Corrupt storage is simply forgotten. */
+  function readStoredSession() {
+    try {
+      const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed.token !== 'string' || !parsed.token) return null;
+      return {
+        token: parsed.token,
+        username: typeof parsed.username === 'string' ? parsed.username : '',
+      };
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function writeStoredSession(session) {
+    try {
+      if (!session || !session.token) localStorage.removeItem(AUTH_STORAGE_KEY);
+      else localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ v: 1, token: session.token, username: session.username || '' }));
+    } catch (err) {
+      // Storage can be full or blocked; the session then lives for this page only.
+    }
+  }
+
+  /** The i18n text for an error code from the favorites engine. */
+  function authErrorMessage(code) {
+    const keys = {
+      usernameRequired: 'account.errUsernameRequired',
+      usernameLength: 'account.errUsernameLength',
+      usernameCharset: 'account.errUsernameCharset',
+      passwordRequired: 'account.errPasswordRequired',
+      passwordTooShort: 'account.errPasswordTooShort',
+      passwordTooLong: 'account.errPasswordTooLong',
+      'invalid-credentials': 'account.errInvalidCredentials',
+      'username-taken': 'account.errUsernameTaken',
+      unauthorized: 'account.errUnauthorized',
+      'rate-limited': 'account.errRateLimited',
+      network: 'account.errNetwork',
+      unavailable: 'account.errUnavailable',
+      invalid: 'account.errInvalid',
+      server: 'account.errServer',
+    };
+    const english = {
+      usernameRequired: 'Choose a username.',
+      usernameLength: 'Usernames are 3 to 32 characters.',
+      usernameCharset: 'Use letters, numbers, and . _ - only.',
+      passwordRequired: 'Choose a password.',
+      passwordTooShort: 'Passwords need at least 8 characters.',
+      passwordTooLong: 'That password is too long.',
+      'invalid-credentials': 'That username and password do not match.',
+      'username-taken': 'That username is already taken.',
+      unauthorized: 'Your session has expired. Please sign in again.',
+      'rate-limited': 'Too many attempts. Please wait a moment and try again.',
+      network: 'Could not reach the WeatherScope server.',
+      unavailable: 'Accounts need the WeatherScope server (run "node server.js").',
+      invalid: 'That request was not valid. Please try again.',
+      server: 'Something went wrong on the server. Please try again.',
+    };
+    return t(keys[code] || 'account.errServer', null, english[code] || english.server);
+  }
+
+  /** Announces a favorites outcome through the polite live region. */
+  function announceFavorites(message) {
+    if (elements.favoritesStatus) elements.favoritesStatus.textContent = message;
+  }
+
+  // --- Rendering ----------------------------------------------------------
+
+  function renderAccountUI() {
+    const auth = state.auth;
+    const signedIn = !!auth.token;
+
+    if (elements.accountBtnLabel) {
+      elements.accountBtnLabel.textContent = signedIn
+        ? (auth.username || t('account.account', null, 'Account'))
+        : t('account.signIn', null, 'Sign in');
+    }
+    if (elements.accountBtn) {
+      elements.accountBtn.classList.toggle('is-signed-in', signedIn);
+      const label = signedIn
+        ? t('account.openAccount', { username: auth.username }, `Account menu for ${auth.username}`)
+        : t('account.buttonTitle', null, 'Sign in to save favorite cities');
+      elements.accountBtn.title = label;
+      elements.accountBtn.setAttribute('aria-label', label);
+    }
+
+    if (elements.accountSignedOut) elements.accountSignedOut.classList.toggle('hidden', signedIn);
+    if (elements.accountSignedIn) elements.accountSignedIn.classList.toggle('hidden', !signedIn);
+
+    if (signedIn) {
+      if (elements.accountPanelTitle) elements.accountPanelTitle.textContent = t('account.account', null, 'Account');
+      if (elements.accountWelcome) {
+        elements.accountWelcome.textContent = t('account.signedInAs', { username: auth.username }, `Signed in as ${auth.username}`);
+      }
+      if (elements.accountFavCount) {
+        const count = auth.favorites.length;
+        elements.accountFavCount.textContent = count === 1
+          ? t('account.favoritesOne', { count: count }, '1 saved city')
+          : t('account.favoritesMany', { count: count }, `${count} saved cities`);
+      }
+      return;
+    }
+
+    // Signed out: the panel is the form, in whichever mode it is in.
+    const registering = auth.mode === 'register';
+    if (elements.accountPanelTitle) {
+      elements.accountPanelTitle.textContent = registering
+        ? t('account.register', null, 'Create account')
+        : t('account.signIn', null, 'Sign in');
+    }
+    if (elements.accountModeSignIn) {
+      elements.accountModeSignIn.classList.toggle('active', !registering);
+      elements.accountModeSignIn.setAttribute('aria-pressed', String(!registering));
+    }
+    if (elements.accountModeRegister) {
+      elements.accountModeRegister.classList.toggle('active', registering);
+      elements.accountModeRegister.setAttribute('aria-pressed', String(registering));
+    }
+    if (elements.authSubmitBtn) {
+      elements.authSubmitBtn.textContent = registering
+        ? t('account.createAccount', null, 'Create account')
+        : t('account.signIn', null, 'Sign in');
+      elements.authSubmitBtn.disabled = auth.busy;
+    }
+    if (elements.authPassword) {
+      elements.authPassword.setAttribute('autocomplete', registering ? 'new-password' : 'current-password');
+    }
+
+    if (elements.authError) {
+      if (auth.lastError) {
+        elements.authError.textContent = auth.lastError;
+        elements.authError.hidden = false;
+      } else {
+        elements.authError.textContent = '';
+        elements.authError.hidden = true;
+      }
+    }
+
+    if (elements.authNote) {
+      if (auth.available === false) {
+        elements.authNote.textContent = t(
+          'account.serverRequired',
+          null,
+          'Accounts and favorites need the WeatherScope server. Start it with "node server.js" and open the app through it.'
+        );
+        elements.authNote.classList.remove('hidden');
+      } else {
+        elements.authNote.textContent = '';
+        elements.authNote.classList.add('hidden');
+      }
+    }
+  }
+
+  /** The favorites bar: one chip per saved city, hidden when there are none. */
+  function renderFavoritesBar() {
+    if (!elements.favoritesBar || !elements.favoritesChips) return;
+    const signedIn = !!state.auth.token;
+    const favorites = state.auth.favorites;
+    const engine = favoritesEngine();
+
+    const show = signedIn && favorites.length > 0;
+    elements.favoritesBar.classList.toggle('hidden', !show);
+    // The bar belongs to every mode except the climate filter, whose own chip
+    // bar replaces it (matching the popular-cities bar it mirrors).
+    if (state.searchMode === 'climate') elements.favoritesBar.classList.add('hidden');
+    if (!show) {
+      elements.favoritesChips.innerHTML = '';
+      return;
+    }
+
+    elements.favoritesChips.innerHTML = '';
+
+    favorites.forEach(function (city) {
+      const key = engine ? engine.cityKey(city) : '';
+      const label = engine ? engine.describeCity(city) : city.name;
+
+      const chip = document.createElement('div');
+      chip.className = 'favorite-chip';
+
+      const main = document.createElement('button');
+      main.type = 'button';
+      main.className = 'favorite-chip-main';
+      main.dataset.favoriteKey = key;
+      // Only the city name is ever rendered, and only with textContent - a
+      // saved name can never become markup.
+      main.title = t('favorites.open', { city: label }, `Open the forecast for ${label}`);
+      main.setAttribute('aria-label', t('favorites.openAria', { city: label }, `Open the forecast for ${label}`));
+
+      const star = document.createElement('span');
+      star.className = 'favorite-chip-star';
+      star.setAttribute('aria-hidden', 'true');
+      star.textContent = '★';
+
+      const name = document.createElement('span');
+      name.className = 'favorite-chip-name';
+      name.textContent = city.name;
+
+      main.appendChild(star);
+      main.appendChild(name);
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'favorite-chip-remove';
+      remove.dataset.favoriteRemove = key;
+      remove.setAttribute('aria-label', t('favorites.removeAria', { city: label }, `Remove ${label} from favorites`));
+      remove.title = t('favorites.remove', null, 'Remove from favorites');
+      remove.textContent = '×';
+
+      chip.appendChild(main);
+      chip.appendChild(remove);
+      elements.favoritesChips.appendChild(chip);
+    });
+  }
+
+  /** The hero star mirrors whether the shown city is saved. */
+  function updateFavoriteButton() {
+    const btn = elements.favoriteBtn;
+    if (!btn) return;
+    const engine = favoritesEngine();
+    const city = state.currentCity;
+    const saved = !!(engine && city && engine.isFavorite(state.auth.favorites, city));
+    const signedIn = !!state.auth.token;
+
+    btn.classList.toggle('is-favorite', saved);
+    btn.setAttribute('aria-pressed', String(saved));
+
+    let label;
+    if (!signedIn) {
+      label = t('favorites.signInAria', null, 'Sign in to save this city to favorites');
+    } else if (saved) {
+      label = t('favorites.savedAria', { city: city ? city.name : '' }, 'Remove this city from favorites');
+    } else {
+      label = t('favorites.saveAria', { city: city ? city.name : '' }, 'Save this city to favorites');
+    }
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+  }
+
+  // --- Panel behaviour ----------------------------------------------------
+
+  function openAccountPanel() {
+    if (!elements.accountPanel) return;
+    elements.accountPanel.classList.remove('hidden');
+    if (elements.accountBtn) elements.accountBtn.setAttribute('aria-expanded', 'true');
+    renderAccountUI();
+    // Focus the first useful control without stealing focus on a background load.
+    if (!state.auth.token && elements.authUsername && !state.auth.busy) {
+      elements.authUsername.focus();
+    }
+  }
+
+  function closeAccountPanel() {
+    if (!elements.accountPanel) return;
+    elements.accountPanel.classList.add('hidden');
+    if (elements.accountBtn) elements.accountBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function isAccountPanelOpen() {
+    return !!elements.accountPanel && !elements.accountPanel.classList.contains('hidden');
+  }
+
+  function setAccountMode(mode) {
+    state.auth.mode = mode === 'register' ? 'register' : 'signin';
+    state.auth.lastError = '';
+    renderAccountUI();
+    if (elements.authUsername) elements.authUsername.focus();
+  }
+
+  // --- Session lifecycle --------------------------------------------------
+
+  /** Replaces the in-memory favorites and repaints everything that shows them. */
+  function applyFavorites(favorites) {
+    const engine = favoritesEngine();
+    state.auth.favorites = engine ? engine.sanitizeFavorites(favorites) : [];
+    renderFavoritesBar();
+    updateFavoriteButton();
+    renderAccountUI();
+  }
+
+  /** Probes the API (if a session is stored) and paints the first account state. */
+  async function initAuth() {
+    const client = getFavoritesClient();
+    const stored = readStoredSession();
+
+    if (!client) {
+      state.auth.available = false;
+      renderAccountUI();
+      renderFavoritesBar();
+      updateFavoriteButton();
+      return;
+    }
+
+    if (!stored) {
+      // No session yet: still probe, so the panel can say "server needed" before
+      // the visitor has typed anything, but never block the first paint on it.
+      renderAccountUI();
+      renderFavoritesBar();
+      updateFavoriteButton();
+      try {
+        const health = await fetch('api/health', { headers: { Accept: 'application/json' } });
+        state.auth.available = health.ok;
+      } catch (err) {
+        state.auth.available = false;
+      }
+      renderAccountUI();
+      return;
+    }
+
+    state.auth.token = stored.token;
+    state.auth.username = stored.username;
+    renderAccountUI();
+    updateFavoriteButton();
+
+    try {
+      const account = await client.me(stored.token);
+      state.auth.available = true;
+      state.auth.username = account.username || stored.username;
+      writeStoredSession({ token: state.auth.token, username: state.auth.username });
+      applyFavorites(account.favorites);
+    } catch (err) {
+      const engine = favoritesEngine();
+      const code = engine ? engine.apiErrorCode(err) : 'server';
+      if (code === 'unauthorized' || code === 'invalid-credentials') {
+        // The session is genuinely dead: forget it and start clean.
+        signOutLocally();
+      } else {
+        // A network problem or a sleeping server must not sign anyone out.
+        state.auth.available = code === 'network' || code === 'unavailable' ? false : state.auth.available;
+      }
+      renderAccountUI();
+    }
+  }
+
+  function signOutLocally() {
+    state.auth.token = '';
+    state.auth.username = '';
+    state.auth.lastError = '';
+    writeStoredSession(null);
+    applyFavorites([]);
+  }
+
+  async function submitAccountForm() {
+    if (state.auth.busy) return;
+    const client = getFavoritesClient();
+    if (!client) {
+      state.auth.available = false;
+      state.auth.lastError = authErrorMessage('unavailable');
+      renderAccountUI();
+      return;
+    }
+
+    const username = elements.authUsername ? elements.authUsername.value : '';
+    const password = elements.authPassword ? elements.authPassword.value : '';
+    const registering = state.auth.mode === 'register';
+
+    state.auth.busy = true;
+    state.auth.lastError = '';
+    renderAccountUI();
+
+    try {
+      const result = registering
+        ? await client.register(username, password)
+        : await client.login(username, password);
+
+      state.auth.available = true;
+      state.auth.busy = false;
+      state.auth.token = result.token;
+      state.auth.username = result.username || username;
+      state.auth.lastError = '';
+      writeStoredSession({ token: state.auth.token, username: state.auth.username });
+
+      if (elements.authPassword) elements.authPassword.value = '';
+
+      applyFavorites(result.favorites);
+      closeAccountPanel();
+      announceFavorites(
+        t('account.welcome', { username: state.auth.username }, `Signed in as ${state.auth.username}.`)
+      );
+    } catch (err) {
+      state.auth.busy = false;
+      const engine = favoritesEngine();
+      const code = engine ? engine.apiErrorCode(err) : 'server';
+      if (code === 'network' || code === 'unavailable') state.auth.available = false;
+      state.auth.lastError = authErrorMessage(code);
+      renderAccountUI();
+    }
+  }
+
+  async function signOut() {
+    const token = state.auth.token;
+    const client = getFavoritesClient();
+    signOutLocally();
+    closeAccountPanel();
+    announceFavorites(t('account.signedOut', null, 'Signed out.'));
+    if (client && token) await client.logout(token);
+  }
+
+  /** Persists the current favorites, guarding against an out-of-order write. */
+  async function persistFavorites() {
+    const client = getFavoritesClient();
+    if (!client || !state.auth.token) return;
+
+    const seq = ++state.favoritesSeq;
+    try {
+      const saved = await client.saveFavorites(state.auth.token, state.auth.favorites);
+      // A newer change landed while this write was in flight: its value wins.
+      if (seq !== state.favoritesSeq) return;
+      applyFavorites(saved);
+    } catch (err) {
+      if (seq !== state.favoritesSeq) return;
+      const code = favoritesEngine().apiErrorCode(err);
+      if (code === 'unauthorized' || code === 'invalid-credentials') {
+        signOutLocally();
+        announceFavorites(authErrorMessage('unauthorized'));
+        return;
+      }
+      announceFavorites(authErrorMessage(code));
+    }
+  }
+
+  // --- Actions ------------------------------------------------------------
+
+  /** Saves or un-saves the city currently on screen. */
+  async function toggleFavorite() {
+    const engine = favoritesEngine();
+    const city = state.currentCity;
+    if (!engine || !city) return;
+
+    if (!state.auth.token) {
+      // Nothing to save against yet - open the account panel with the reason.
+      state.auth.lastError = '';
+      state.auth.mode = 'signin';
+      openAccountPanel();
+      announceFavorites(t('favorites.signInHint', { city: city.name }, `Sign in to save ${city.name} to favorites.`));
+      return;
+    }
+
+    const wasSaved = engine.isFavorite(state.auth.favorites, city);
+    const result = wasSaved
+      ? engine.removeFavorite(state.auth.favorites, city)
+      : engine.addFavorite(state.auth.favorites, city);
+
+    if (!result.changed) {
+      if (result.reason === 'full') {
+        announceFavorites(t('favorites.full', { max: FAVORITES_MAX }, `You can save up to ${FAVORITES_MAX} cities.`));
+      }
+      return;
+    }
+
+    const label = engine.describeCity(city) || city.name;
+    applyFavorites(result.list);
+    announceFavorites(
+      wasSaved
+        ? t('favorites.removed', { city: label }, `${label} removed from your favorites.`)
+        : t('favorites.added', { city: label }, `${label} saved to your favorites.`)
+    );
+    await persistFavorites();
+  }
+
+  async function removeFavoriteByKey(key) {
+    const engine = favoritesEngine();
+    if (!engine || !key || !state.auth.token) return;
+
+    const city = engine.findFavorite(state.auth.favorites, key);
+    const label = city ? (engine.describeCity(city) || city.name) : '';
+    const result = engine.removeFavorite(state.auth.favorites, key);
+    if (!result.changed) return;
+
+    applyFavorites(result.list);
+    if (label) announceFavorites(t('favorites.removed', { city: label }, `${label} removed from your favorites.`));
+    await persistFavorites();
+  }
+
+  /** Opens a saved city in whichever mode is active, exactly like the popular chips. */
+  function openFavoriteCity(key) {
+    const engine = favoritesEngine();
+    if (!engine) return;
+    const city = engine.findFavorite(state.auth.favorites, key);
+    if (!city) return;
+
+    if (state.searchMode === 'compare') {
+      addCompareLocation(city);
+      setCompareNotice('');
+    } else if (state.searchMode === 'cameras') {
+      openCameraCityFromName(city.name);
+    } else {
+      setMode('city');
+      loadCityWeather(city);
+    }
+  }
+
   /**
    * The camera panel, once.
    *
@@ -6279,6 +6842,9 @@ const icon = document.createElement('span');
       state.currentCity = city;
       state.weatherData = weatherData;
 
+      // The hero star mirrors the city now on screen, not the one that was.
+      updateFavoriteButton();
+
       writeStored(STORAGE_KEYS.lastCity, LEGACY_STORAGE_KEYS.lastCity, JSON.stringify(city));
 
       elements.searchInput.value = city.name;
@@ -6719,6 +7285,11 @@ const icon = document.createElement('span');
     elements.quickCitiesContainer.classList.toggle('hidden', mode === 'climate');
     elements.climateChipsContainer.classList.toggle('hidden', mode !== 'climate');
 
+    // The favorites bar mirrors the popular-cities bar: it is shown in every
+    // mode that shows city chips, and hidden in Climate Filter where the
+    // preset chips take its place.
+    renderFavoritesBar();
+
     // Compare and Live Cameras each have their own surface; City/Climate own the
     // dashboard.
     elements.dashboard.classList.toggle('hidden', modeOwnsMainArea(mode));
@@ -6808,6 +7379,60 @@ const icon = document.createElement('span');
         tabs[next].focus();
       });
     }
+
+    // --- Accounts & favorites -------------------------------------------
+    if (elements.accountBtn) {
+      elements.accountBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (isAccountPanelOpen()) closeAccountPanel();
+        else openAccountPanel();
+      });
+    }
+    if (elements.accountCloseBtn) {
+      elements.accountCloseBtn.addEventListener('click', closeAccountPanel);
+    }
+    if (elements.accountModeSignIn) {
+      elements.accountModeSignIn.addEventListener('click', () => setAccountMode('signin'));
+    }
+    if (elements.accountModeRegister) {
+      elements.accountModeRegister.addEventListener('click', () => setAccountMode('register'));
+    }
+    if (elements.accountForm) {
+      elements.accountForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        submitAccountForm();
+      });
+    }
+    if (elements.accountSignOutBtn) {
+      elements.accountSignOutBtn.addEventListener('click', signOut);
+    }
+    if (elements.favoriteBtn) {
+      elements.favoriteBtn.addEventListener('click', toggleFavorite);
+    }
+    if (elements.favoritesChips) {
+      elements.favoritesChips.addEventListener('click', (e) => {
+        const remove = e.target.closest('.favorite-chip-remove');
+        if (remove && remove.dataset.favoriteRemove) {
+          removeFavoriteByKey(remove.dataset.favoriteRemove);
+          return;
+        }
+        const main = e.target.closest('.favorite-chip-main');
+        if (main && main.dataset.favoriteKey) openFavoriteCity(main.dataset.favoriteKey);
+      });
+    }
+    // Escape closes the panel, and so does a click anywhere outside it.
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && isAccountPanelOpen()) {
+        closeAccountPanel();
+        if (elements.accountBtn) elements.accountBtn.focus();
+      }
+    });
+    document.addEventListener('click', (e) => {
+      if (!isAccountPanelOpen()) return;
+      if (elements.accountPanel && elements.accountPanel.contains(e.target)) return;
+      if (elements.accountBtn && elements.accountBtn.contains(e.target)) return;
+      closeAccountPanel();
+    });
 
     // Form submit
     elements.searchForm.addEventListener('submit', (e) => {
@@ -7318,6 +7943,11 @@ const toCompare = state.searchMode === 'compare';
           renderClimateResults(state.matchingCities, currentClimateCriteria());
         }
         if (isCompareVisible()) renderCompareSection();
+        // The account panel and the favorites bar are built from translated
+        // strings, so a language change repaints them from the state they hold.
+        renderAccountUI();
+        renderFavoritesBar();
+        updateFavoriteButton();
         // The camera panel's own strings (live badge, pause control, distance,
         // the "no camera" line) are all language-bound, and the results render
         // above already repaints each panel from its cached answer.
@@ -7353,6 +7983,10 @@ const toCompare = state.searchMode === 'compare';
     // Establish the initial tab state through the same code path the tabs use,
     // so the active tab carries the single tab stop from the first paint.
     setMode('city');
+
+    // Restore the account session (if any) and paint the account surfaces
+    // before any weather arrives, so the header is honest from the first frame.
+    initAuth();
 
     // Boot the shared ticker and the visitor's reference clock before any data
     // arrives, so there is a clock on screen from the first paint.

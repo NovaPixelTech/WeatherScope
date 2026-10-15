@@ -1,6 +1,16 @@
-# Simple lightweight local static HTTP server for WeatherScope
+# WeatherScope launcher
+#
+# Prefers the zero-dependency Node server (server.js), which serves the static
+# app AND the accounts/favorites API in one process. When Node is not installed
+# it falls back to a PowerShell static file server: the app still works, but
+# sign-in and favorites are unavailable, and the account panel says so.
+#
+#   .\start-server.ps1                 # node when available, else static
+#   .\start-server.ps1 -Port 8080      # choose a port
+#   .\start-server.ps1 -Static         # force the static-only server
 param (
-    [int]$Port = 3000
+    [int]$Port = 3000,
+    [switch]$Static
 )
 
 $HostIP = "127.0.0.1"
@@ -10,6 +20,56 @@ $Folder = $PSScriptRoot
 if (-not (Test-Path $Folder)) {
     Write-Error "Directory not found: $Folder"
     exit 1
+}
+
+$node = Get-Command node -ErrorAction SilentlyContinue
+
+if ($node -and -not $Static) {
+    Write-Host "==========================================" -ForegroundColor Cyan
+    Write-Host " WeatherScope server (node server.js)" -ForegroundColor Green
+    Write-Host " URL: $Url" -ForegroundColor Yellow
+    Write-Host " Accounts & favorites: enabled" -ForegroundColor Green
+    Write-Host " Press Ctrl+C in this terminal to stop." -ForegroundColor Gray
+    Write-Host "==========================================" -ForegroundColor Cyan
+
+    $env:PORT = "$Port"
+    $env:HOST = $HostIP
+
+    # Open the browser once the port actually answers, so we never race startup.
+    $opener = Start-Job -ScriptBlock {
+        param($u)
+        for ($i = 0; $i -lt 24; $i++) {
+            try {
+                $req = [System.Net.WebRequest]::Create($u)
+                $req.Method = "HEAD"
+                $req.Timeout = 500
+                $resp = $req.GetResponse()
+                $resp.Close()
+                break
+            } catch {
+                Start-Sleep -Milliseconds 250
+            }
+        }
+        Start-Process $u
+    } -ArgumentList $Url
+
+    Push-Location $Folder
+    try {
+        & node "server.js"
+    } finally {
+        Pop-Location
+        Stop-Job $opener -ErrorAction SilentlyContinue
+        Remove-Job $opener -Force -ErrorAction SilentlyContinue
+    }
+    exit $LASTEXITCODE
+}
+
+# --- Fallback: static-only PowerShell server -------------------------------
+if ($Static) {
+    Write-Host "Starting static-only server (-Static)." -ForegroundColor Yellow
+} else {
+    Write-Host "Node was not found, so accounts and favorites are unavailable." -ForegroundColor Yellow
+    Write-Host "Install Node.js and re-run to enable sign-in. Serving static files only." -ForegroundColor Yellow
 }
 
 $listener = New-Object System.Net.HttpListener

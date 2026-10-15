@@ -75,7 +75,7 @@ The mark lives in one 32×32 `viewBox` and scales without loss to any size. It i
 - **Instant Unit Switching**: Toggle between Celsius (**°C**) and Fahrenheit (**°F**) with instantaneous client-side recalculation. Temperature, wind (km/h ↔ mph), and precipitation (mm ↔ in) all follow the toggle, and the choice is remembered in `localStorage`.
 - **Data Freshness**: A "Updated N min ago" stamp (corrected for the city's UTC offset) plus a manual refresh button. Live conditions also auto-refresh every 10 minutes while the dashboard is visible.
 - **Dynamic Theming**: Background palette and glowing ambient orbs automatically adapt to the weather (Clear Day, Night, Rain, Thunderstorm, Snow, or Overcast). Animations respect `prefers-reduced-motion`.
-- **Zero Dependencies**: Pure HTML5, CSS3, and modern Vanilla JavaScript — runs in any web browser without Node.js or build steps.
+- **Zero Dependencies**: Pure HTML5, CSS3, and modern Vanilla JavaScript — runs in any web browser without a build step. Node.js is **optional**: it only powers accounts and favorite cities (see [Accounts & favorite cities](#-accounts--favorite-cities)); every forecast feature works without it.
 
 ---
 
@@ -157,7 +157,7 @@ What shrinks instead is the padding and the type inside each tile (`0.78rem → 
 - **Memoised, not recomputed.** The analysed forecast is cached against the hourly payload's identity, so a unit toggle or a window switch does no redundant work; switching windows only recomputes the window answer, never the six tiles.
 - **One thresholds object.** Every boundary lives in `THRESHOLDS` at the top of `advice.js` — the single place to tune behaviour.
 - **Degrades, never breaks.** Missing precipitation, partial arrays, `null` entries, an unusable payload, or even a payload that throws on property access each fall back to a *Not enough forecast data* state. One failing recommendation can never take the dashboard down with it, and the card hides itself if there is nothing to say.
-- **Nothing about you is stored.** The selected window lives in memory for the session only — no commute, no routine, no personal data in `localStorage`, `sessionStorage` or cookies.
+- **Nothing about you is stored.** The selected window lives in memory for the session only — no commute, no routine, no personal data in `localStorage`, `sessionStorage` or cookies. If you choose to create an account, the server stores only your username, a salted password hash and the cities you save — see [Accounts & favorite cities](#-accounts--favorite-cities).
 - **Accessible by construction.** The window selector is a real `role="radiogroup"` with roving tabindex and arrow-key navigation; the headline and the window answer are polite live regions; every tile is a `role="listitem"`.
 
 ### Running the tests
@@ -249,6 +249,65 @@ index.html?city=Tokyo&region=Tokyo&country=Japan&lat=35.6762&lon=139.6503
 
 ```powershell
 node --test
+```
+
+---
+
+## 👤 Accounts & favorite cities
+
+Sign in and the cities you care about follow you: one click saves the city you are looking at, and a **Your cities** bar puts every saved place one click away from any view.
+
+### What it does
+
+- **Save from anywhere a city is shown.** The star next to the city name on the dashboard toggles the current city; toggling it while signed out opens the account panel instead of failing silently.
+- **Favorites follow the account, not the browser.** Saved cities live on the WeatherScope server against your username, so signing in on another device shows the same list.
+- **Up to 24 cities.** The bar is hidden until you save one, and it does not appear in Climate Filter, whose own chip bar replaces it.
+- **Every control is a real control.** The star exposes `aria-pressed`, the chip name and the remove button carry `aria-label`s, and every outcome is announced through a polite live region.
+
+### How accounts work
+
+| Layer | Choice | Why |
+| --- | --- | --- |
+| Passwords | **scrypt** hash with a per-user salt, compared in constant time | No dependency, and a leaked file is not a list of passwords. |
+| Sessions | Random bearer tokens with a 30-day TTL, held in server memory | No cookies, so no CSRF surface, and a restart simply signs everyone out. |
+| Transport | JSON over `/api/*` with a 64 KB body cap | Small and inspectable, and it rejects abusive input early. |
+| Rate limiting | Per-IP on register and login | A password cannot be brute-forced at line speed. |
+| Storage | Atomic writes to `data/users.json`, a corrupt file quarantined | A killed process never leaves a half-written account file. |
+
+Validation is the **same `favorites.js` engine on both sides** — the browser loads it as a global and the server `require`s it — so a username or city one side accepts is exactly what the other accepts. A saved city's identity is its **coordinates** (to four decimals), not its name, so a hand-edited request cannot save the same place twice.
+
+### Running it
+
+Accounts and favorites need the small zero-dependency Node server, which serves the static app **and** the API:
+
+```bash
+node server.js        # http://127.0.0.1:3000/  (env: PORT, HOST, WEATHERSCOPE_DATA)
+```
+
+`start-server.ps1` prefers it automatically when Node is installed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-server.ps1
+```
+
+Opened as a plain file (`file://`), or through the static-only fallback when Node is absent, the app still works — only the account panel says that sign-in needs the server.
+
+### API
+
+| Route | Purpose |
+| --- | --- |
+| `POST /api/auth/register` | Create an account; returns a session token and the (empty) favorites. |
+| `POST /api/auth/login` | Sign in; returns a session token and the saved cities. |
+| `POST /api/auth/logout` | End the session. |
+| `GET /api/auth/me` | Restore a session from a stored token. |
+| `GET /api/favorites` | The signed-in account's saved cities. |
+| `PUT /api/favorites` | Replace them (validated, de-duplicated, capped at 24). |
+| `GET /api/health` | Liveness probe. |
+
+### Running the tests
+
+```powershell
+node --test tests/favorites.test.js tests/server.test.js tests/favorites-wiring.test.js
 ```
 
 ---
@@ -510,14 +569,20 @@ Run the included PowerShell script in your terminal:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\start-server.ps1
 ```
-This will start a local server at `http://127.0.0.1:3000/` and automatically launch your default browser.
+This starts a local server at `http://127.0.0.1:3000/` and automatically launches your default browser. When Node.js is installed it runs `node server.js`, which also enables **accounts and favorite cities**; without Node it falls back to serving static files only (and says so).
+
+### Method 3: Node server directly (accounts & favorites)
+```bash
+node server.js        # http://127.0.0.1:3000/  (env: PORT, HOST, WEATHERSCOPE_DATA)
+```
+The zero-dependency Node server serves the app **and** the accounts/favorites API. See [Accounts & favorite cities](#-accounts--favorite-cities).
 
 ---
 
 ## 📁 File Structure
 
 ```text
-Test_001/
+WeatherScope/
 ├── index.html        # Semantic HTML5 app markup, ARIA wiring, City / Compare / Climate mode switchers
 ├── styles.css        # Glassmorphic CSS styling, dynamic themes, climate results grid, comparison tables, reduced-motion support
 ├── favicon.svg       # The radar-scope mark, and the scalable master of the logo
@@ -527,6 +592,8 @@ Test_001/
 ├── advice.js         # Personal Weather Assistant engine (pure, unit-agnostic, no DOM access)
 ├── compare.js        # Compare Locations engine (pure: selection, metrics, thresholds, insights)
 ├── share.js          # Shared forecast links engine (pure: city + card deep links, validation)
+├── favorites.js      # Favorites + account validation engine & API client (shared by app.js and server.js)
+├── server.js         # Zero-dependency Node static + accounts/favorites API server (node server.js)
 ├── tests/
 │   ├── advice.test.js         # Recommendation logic: thresholds, units, scope, missing data, determinism
 │   ├── wiring.test.js         # Dashboard glue: global, script order, element bindings, escaping, styling
@@ -536,8 +603,12 @@ Test_001/
 │   ├── compare-wiring.test.js # Comparison glue: script order, element ids, tab semantics, escaping, styling
 │   ├── compare-runtime.test.js# App booted against a DOM stub: modes, fetch, retry, units, clearing
 │   ├── share.test.js          # Share links: deep-link format, card vocabulary, hostile params, arrival wiring
+│   ├── favorites.test.js      # Favorites engine + API client: validation, dedupe, request contract
+│   ├── favorites-wiring.test.js # Accounts/favorites glue: script order, element ids, placement, i18n, escaping
+│   ├── server.test.js         # The API server: auth, sessions, favorites round-trips, bad input, rate limits
 │   └── storage-keys.test.js   # The SkyCast rename: legacy unit/city/cache migration, and that it never clobbers
-├── start-server.ps1  # Lightweight zero-dependency PowerShell static web server
+├── start-server.ps1  # Launcher: node server.js when Node is present, else a static-only PowerShell server
+├── data/             # Created at runtime: users.json (username, salted password hash, saved cities)
 └── README.md         # Documentation and project overview
 ```
 
@@ -555,7 +626,7 @@ The app used to be called **SkyCast**. The rename touched three separate layers,
 
 The storage keys are the only part that could actually hurt someone, so they are migrated rather than renamed in place. `readStored()` / `writeStored()` at the top of `app.js` adopt a pre-rename value the first time the new key is read, write everything new under the new name, and delete the old key on the way through. A value already stored under the new name always wins, so a half-migrated profile can never regress. `tests/storage-keys.test.js` holds all of that in place — it boots the real `app.js` against a seeded storage map.
 
-Nothing about you is stored beyond the unit toggle and the last city you looked at, and the selected rain window remains session-only.
+Nothing about you is stored beyond the unit toggle and the last city you looked at, and the selected rain window remains session-only. If you sign in, your username, a salted password hash and your saved cities live on the WeatherScope server rather than in the browser — see [Accounts & favorite cities](#-accounts--favorite-cities).
 
 ### Running the tests
 

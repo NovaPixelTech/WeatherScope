@@ -156,6 +156,27 @@
       </div>
 
 <div class="header-controls">
+        <!-- Account control. Accounts exist so a saved city follows the person
+             rather than the browser: favorites are kept on the WeatherScope
+             server against the signed-in account. Opening the panel is a
+             non-modal popover, so the app stays usable from behind it. -->
+        <button
+          type="button"
+          class="account-btn"
+          id="account-btn"
+          aria-haspopup="dialog"
+          aria-expanded="false"
+          aria-controls="account-panel"
+          title="Sign in to save favorite cities"
+          data-i18n-title="account.buttonTitle"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="8" r="3.5" />
+            <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
+          </svg>
+          <span id="account-btn-label" data-i18n="account.signIn">Sign in</span>
+        </button>
+
         <!-- Visitor reference clock: the "your side" of every time difference shown below -->
         <div class="user-clock" id="user-clock">
           <svg class="user-clock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -214,6 +235,53 @@
           <option value="es">Español (ES)</option>
           <option value="fr">Français (FR)</option>
         </select>
+
+        <!-- Account panel: sign in / create account, or the signed-in summary.
+             A non-modal popover anchored under the account button, closed by
+             Escape, the close button, a click outside, or choosing a favorite.
+             It lives inside .header-controls so it can anchor to the button. -->
+        <div class="account-panel hidden" id="account-panel" role="dialog" aria-modal="false" aria-labelledby="account-panel-title">
+          <div class="account-panel-head">
+            <h2 class="account-panel-title" id="account-panel-title" data-i18n="account.signIn">Sign in</h2>
+            <button type="button" class="account-close-btn" id="account-close-btn" aria-label="Close account panel" data-i18n-aria-label="account.close">
+              <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+              </svg>
+            </button>
+          </div>
+
+          <!-- Signed out: one form, switched between sign-in and register -->
+          <div class="account-view" id="account-signed-out">
+            <p class="account-hint" id="account-hint" data-i18n="account.hint">Sign in to save your favorite cities and reach them quickly on any device.</p>
+
+            <div class="account-mode-switch" role="group" aria-label="Account action" data-i18n-aria-label="account.modeAria">
+              <button type="button" class="account-mode-btn active" id="account-mode-signin" aria-pressed="true" data-i18n="account.signIn">Sign in</button>
+              <button type="button" class="account-mode-btn" id="account-mode-register" aria-pressed="false" data-i18n="account.register">Create account</button>
+            </div>
+
+            <form class="account-form" id="account-form" novalidate>
+              <label class="account-field" for="auth-username">
+                <span class="account-field-label" data-i18n="account.username">Username</span>
+                <input type="text" id="auth-username" name="username" autocomplete="username" spellcheck="false" maxlength="32" required />
+              </label>
+              <label class="account-field" for="auth-password">
+                <span class="account-field-label" data-i18n="account.password">Password</span>
+                <input type="password" id="auth-password" name="password" autocomplete="current-password" maxlength="200" required />
+              </label>
+              <p class="account-error" id="auth-error" role="alert" aria-live="assertive" hidden></p>
+              <button type="submit" class="btn btn-search account-submit-btn" id="auth-submit-btn" data-i18n="account.signIn">Sign in</button>
+            </form>
+
+            <p class="account-note hidden" id="auth-note"></p>
+          </div>
+
+          <!-- Signed in: who, how many cities, and a way out -->
+          <div class="account-view hidden" id="account-signed-in">
+            <p class="account-welcome" id="account-welcome"></p>
+            <p class="account-count" id="account-fav-count"></p>
+            <button type="button" class="btn btn-secondary account-signout-btn" id="account-signout-btn" data-i18n="account.signOut">Sign out</button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -259,6 +327,15 @@
         <button type="button" class="chip climate-filter-chip" data-condition="showers" aria-pressed="false">🌈 <span data-i18n="climate.rainyMild">Rainy &amp; Mild</span></button>
       </div>
     </div>
+
+    <!-- Your favorite cities. Rendered from the signed-in account's saved list,
+         and hidden entirely when there is nothing to show. It sits above the
+         main area so a saved city is one click away from any view. -->
+    <div class="favorites-bar hidden" id="favorites-bar">
+      <span class="quick-label" id="favorites-label" data-i18n="favorites.title">Your cities</span>
+      <div class="quick-chips favorites-chips" id="favorites-chips" role="group" aria-labelledby="favorites-label"></div>
+    </div>
+    <p class="sr-only" id="favorites-status" role="status" aria-live="polite"></p>
 
     <!-- Main Content Area -->
     <main class="main-content" id="main-content" role="tabpanel" aria-live="polite" aria-busy="false">
@@ -635,6 +712,12 @@
               <span id="condition-text">Mainly Clear</span>
             </div>
             <div class="hero-actions">
+              <!-- Save this city to the signed-in account's favorites. -->
+              <button type="button" class="btn btn-icon favorite-btn" id="favorite-btn" aria-pressed="false" title="Save this city to favorites" data-i18n-title="favorites.saveAria" aria-label="Save this city to favorites" data-i18n-aria-label="favorites.saveAria">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.6 9.7l5.8-.8L12 3.6z" />
+                </svg>
+              </button>
               <button type="button" class="btn btn-icon share-btn" id="share-btn" title="Share weather" data-i18n-title="share.button" aria-label="Share weather" data-i18n-aria-label="share.button">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <circle cx="18" cy="5" r="3" />
@@ -945,6 +1028,7 @@
   <script src="share.js"></script>
   <!-- Pure camera discovery logic (bbox query, ranking, cadence), no DOM access -->
   <script src="cameras.js"></script>
+  <script src="favorites.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
