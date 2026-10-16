@@ -21,6 +21,8 @@
  *       PUT  /api/favorites      { favorites: [...] }   -> { favorites }
  *       GET  /api/alerts                                -> { alerts }
  *       PUT  /api/alerts         { alerts: [...] }      -> { alerts }
+ *       GET  /api/profile                               -> { profile }
+ *       PUT  /api/profile        { profile: {...} }     -> { profile }
  *
  * Security, in the order it matters:
  *
@@ -208,6 +210,7 @@ function createStore(dataDir, log) {
       createdAt: Date.now(),
       favorites: [],
       alerts: [],
+      profile: Favorites.defaultProfile(),
     };
     store.users[key] = record;
     await persist();
@@ -226,7 +229,20 @@ function createStore(dataDir, log) {
     return record.alerts;
   }
 
-  return { find: find, create: create, setFavorites: setFavorites, setAlerts: setAlerts, persist: persist };
+  async function setProfile(record, profile) {
+    record.profile = profile;
+    await persist();
+    return record.profile;
+  }
+
+  return {
+    find: find,
+    create: create,
+    setFavorites: setFavorites,
+    setAlerts: setAlerts,
+    setProfile: setProfile,
+    persist: persist,
+  };
 }
 
 // ==========================================================================
@@ -460,7 +476,13 @@ function createApiHandler(config) {
     const method = req.method || 'GET';
 
     if (urlPath === '/api/health' && method === 'GET') {
-      sendJson(res, 200, { ok: true, service: 'weatherscope', favorites: Favorites.MAX_FAVORITES, alerts: Alerts.MAX_ALERTS });
+      sendJson(res, 200, {
+        ok: true,
+        service: 'weatherscope',
+        favorites: Favorites.MAX_FAVORITES,
+        alerts: Alerts.MAX_ALERTS,
+        contacts: Favorites.MAX_CONTACTS,
+      });
       return true;
     }
 
@@ -503,6 +525,7 @@ function createApiHandler(config) {
         user: publicUser(record),
         favorites: Favorites.sanitizeFavorites(record.favorites),
         alerts: Alerts.sanitizeAlerts(record.alerts),
+        profile: Favorites.sanitizeProfile(record.profile),
       });
       return true;
     }
@@ -548,6 +571,7 @@ function createApiHandler(config) {
         user: publicUser(record),
         favorites: Favorites.sanitizeFavorites(record.favorites),
         alerts: Alerts.sanitizeAlerts(record.alerts),
+        profile: Favorites.sanitizeProfile(record.profile),
       });
       return true;
     }
@@ -560,6 +584,42 @@ function createApiHandler(config) {
       }
       sessions.revoke(bearerToken(req));
       sendJson(res, 200, { ok: true });
+      return true;
+    }
+
+    // --- The email-notification profile -----------------------------------
+    if (urlPath === '/api/profile') {
+      const auth = authenticate(req);
+      if (!auth) {
+        sendJson(res, 401, { ok: false, code: 'unauthorized' });
+        return true;
+      }
+
+      if (method === 'GET') {
+        sendJson(res, 200, { ok: true, profile: Favorites.sanitizeProfile(auth.record.profile) });
+        return true;
+      }
+
+      if (method === 'PUT') {
+        let body;
+        try {
+          body = await readJson(req);
+        } catch (err) {
+          sendJson(res, 400, { ok: false, code: 'invalid' });
+          return true;
+        }
+        // Unlike favorites and alerts, a profile is a single object, so a stray
+        // array or scalar is refused outright rather than coerced.
+        if (!body || typeof body.profile !== 'object' || body.profile === null || Array.isArray(body.profile)) {
+          sendJson(res, 400, { ok: false, code: 'invalid' });
+          return true;
+        }
+        const saved = await store.setProfile(auth.record, Favorites.sanitizeProfile(body.profile));
+        sendJson(res, 200, { ok: true, profile: saved });
+        return true;
+      }
+
+      sendJson(res, 405, { ok: false, code: 'method-not-allowed' });
       return true;
     }
 
@@ -581,6 +641,7 @@ function createApiHandler(config) {
           user: publicUser(auth.record),
           favorites: Favorites.sanitizeFavorites(auth.record.favorites),
           alerts: Alerts.sanitizeAlerts(auth.record.alerts),
+          profile: Favorites.sanitizeProfile(auth.record.profile),
         });
         return true;
       }

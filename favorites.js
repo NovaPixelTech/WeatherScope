@@ -61,6 +61,13 @@
   const MAX_NAME_LENGTH = 120;
   const MAX_TIMEZONE_LENGTH = 64;
 
+  // The email-notification profile. Addresses are stored as opaque strings and
+  // only ever rendered with textContent; the cap keeps a hand-edited request
+  // from turning an account into a mailing list.
+  const MAX_CONTACTS = 10;
+  const MAX_EMAIL_LENGTH = 254; // the practical RFC 5321 limit
+  const MAX_CONTACT_NAME_LENGTH = 60;
+
   const USERNAME_MIN = 3;
   const USERNAME_MAX = 32;
   const PASSWORD_MIN = 8;
@@ -337,6 +344,86 @@
     return Array.isArray(value) ? value.slice(0, 200) : [];
   }
 
+  // ==========================================================================
+  // The email-notification profile
+  // ==========================================================================
+  // An account may carry an address of its own and a short list of friends, so
+  // that a triggered alert can *also* go out by email. Nothing here sends mail:
+  // delivery needs the Node server running, which a static host cannot do, so
+  // this half only keeps the addresses valid, bounded and de-duplicated. Address
+  // syntax is checked pragmatically - reject typos, not the RFC - because the
+  // value is only ever handed to a mailer as an opaque string.
+
+  /** One `@`, a dotted domain, no spaces or runs of dots. `''` when unusable. */
+  function normalizeEmail(raw) {
+    const value = typeof raw === 'string' ? raw.trim() : '';
+    if (!value || value.length > MAX_EMAIL_LENGTH) return '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return '';
+    if (value.indexOf('..') !== -1) return '';
+
+    const at = value.indexOf('@');
+    const local = value.slice(0, at);
+    const domain = value.slice(at + 1);
+    if (!local || local.charAt(0) === '.' || local.charAt(local.length - 1) === '.') return '';
+    // A domain cannot start or end with a dot or a hyphen.
+    if ('. -'.indexOf(domain.charAt(0)) !== -1) return '';
+    if ('. -'.indexOf(domain.charAt(domain.length - 1)) !== -1) return '';
+    return value;
+  }
+
+  /** True when `raw` is a usable address; the shape the account form checks. */
+  function isValidEmail(raw) {
+    return normalizeEmail(raw) !== '';
+  }
+
+  /** A friend: how to reach them, what to call them, and whether they are on. */
+  function sanitizeContact(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const email = normalizeEmail(raw.email);
+    if (!email) return null;
+    return {
+      name: cleanText(raw.name, MAX_CONTACT_NAME_LENGTH),
+      email: email,
+      enabled: raw.enabled !== false,
+    };
+  }
+
+  /**
+   * A bounded, de-duplicated friend list. Identity is the address (compared
+   * case-insensitively), so the same person cannot be added twice with different
+   * capitalisation, and the first spelling is kept for display.
+   */
+  function sanitizeContacts(raw) {
+    if (!Array.isArray(raw)) return [];
+    const seen = {};
+    const out = [];
+    for (let i = 0; i < raw.length; i += 1) {
+      const contact = sanitizeContact(raw[i]);
+      if (!contact) continue;
+      const key = contact.email.toLowerCase();
+      if (seen[key]) continue;
+      seen[key] = true;
+      out.push(contact);
+      if (out.length >= MAX_CONTACTS) break;
+    }
+    return out;
+  }
+
+  /** A profile with nothing turned on - what a brand-new account starts with. */
+  function defaultProfile() {
+    return { emailEnabled: false, email: '', contacts: [] };
+  }
+
+  /** The whole profile, sanitized: `{ emailEnabled, email, contacts }`. */
+  function sanitizeProfile(raw) {
+    const data = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    return {
+      emailEnabled: data.emailEnabled === true,
+      email: normalizeEmail(data.email),
+      contacts: sanitizeContacts(data.contacts),
+    };
+  }
+
   function mapStatus(status, payload) {
     const code = payload && typeof payload.code === 'string' && KNOWN_ERROR_CODES[payload.code]
       ? payload.code
@@ -440,6 +527,7 @@
         username: asString(user.username) || asString(payload && payload.username) || fallbackUsername,
         favorites: sanitizeFavorites(payload && payload.favorites),
         alerts: asAlertList(payload && payload.alerts),
+        profile: sanitizeProfile(payload && payload.profile),
       };
     }
 
@@ -484,6 +572,7 @@
           username: asString(user.username) || asString(payload && payload.username),
           favorites: sanitizeFavorites(payload && payload.favorites),
           alerts: asAlertList(payload && payload.alerts),
+          profile: sanitizeProfile(payload && payload.profile),
         };
       },
 
@@ -515,6 +604,21 @@
           body: { alerts: asAlertList(alerts) },
         });
         return asAlertList(payload && payload.alerts);
+      },
+
+      /** The account's email-notification profile, sanitized. */
+      async getProfile(token) {
+        const payload = await request('GET', '/api/profile', { token: token });
+        return sanitizeProfile(payload && payload.profile);
+      },
+
+      /** Replaces the profile with `profile`, returning what was stored. */
+      async saveProfile(token, profile) {
+        const payload = await request('PUT', '/api/profile', {
+          token: token,
+          body: { profile: sanitizeProfile(profile) },
+        });
+        return sanitizeProfile(payload && payload.profile);
       },
     };
   }
@@ -711,10 +815,17 @@
           createdAt: now(),
           favorites: [],
           alerts: [],
+          profile: defaultProfile(),
         };
         store.users[keyOf(credentials.username)] = record;
         writeStore(store);
-        return { token: LOCAL_SESSION_PREFIX + record.username, username: record.username, favorites: [], alerts: [] };
+        return {
+          token: LOCAL_SESSION_PREFIX + record.username,
+          username: record.username,
+          favorites: [],
+          alerts: [],
+          profile: defaultProfile(),
+        };
       },
 
       async login(username, password) {
@@ -729,6 +840,7 @@
           username: record.username,
           favorites: sanitizeFavorites(record.favorites),
           alerts: asAlertList(record.alerts),
+          profile: sanitizeProfile(record.profile),
         };
       },
 
@@ -743,6 +855,7 @@
           username: found.record.username,
           favorites: sanitizeFavorites(found.record.favorites),
           alerts: asAlertList(found.record.alerts),
+          profile: sanitizeProfile(found.record.profile),
         };
       },
 
@@ -767,6 +880,17 @@
         writeStore(found.store);
         return found.record.alerts;
       },
+
+      async getProfile(token) {
+        return sanitizeProfile(recordFor(token).record.profile);
+      },
+
+      async saveProfile(token, profile) {
+        const found = recordFor(token);
+        found.record.profile = sanitizeProfile(profile);
+        writeStore(found.store);
+        return found.record.profile;
+      },
     };
   }
 
@@ -774,6 +898,9 @@
     MAX_FAVORITES: MAX_FAVORITES,
     COORD_PRECISION: COORD_PRECISION,
     MAX_NAME_LENGTH: MAX_NAME_LENGTH,
+    MAX_CONTACTS: MAX_CONTACTS,
+    MAX_EMAIL_LENGTH: MAX_EMAIL_LENGTH,
+    MAX_CONTACT_NAME_LENGTH: MAX_CONTACT_NAME_LENGTH,
     USERNAME_MIN: USERNAME_MIN,
     USERNAME_MAX: USERNAME_MAX,
     PASSWORD_MIN: PASSWORD_MIN,
@@ -793,6 +920,12 @@
     validateUsername: validateUsername,
     validatePassword: validatePassword,
     validateCredentials: validateCredentials,
+    normalizeEmail: normalizeEmail,
+    isValidEmail: isValidEmail,
+    sanitizeContact: sanitizeContact,
+    sanitizeContacts: sanitizeContacts,
+    defaultProfile: defaultProfile,
+    sanitizeProfile: sanitizeProfile,
     createClient: createClient,
     createLocalClient: createLocalClient,
     isLocalToken: isLocalToken,
