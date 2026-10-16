@@ -177,6 +177,30 @@
           <span id="account-btn-label" data-i18n="account.signIn">Sign in</span>
         </button>
 
+        <!-- Weather alerts. The bell opens a non-modal panel where a signed-in
+             visitor sets "tell me when X is coming" rules for saved cities; the
+             badge counts the rules that match right now. A static page can only
+             check while it is open, so the panel says exactly that rather than
+             pretending alerts arrive in the background. -->
+        <button
+          type="button"
+          class="alerts-btn"
+          id="alerts-btn"
+          aria-haspopup="dialog"
+          aria-expanded="false"
+          aria-controls="alerts-panel"
+          aria-label="Weather alerts"
+          title="Weather alerts"
+          data-i18n-aria-label="alerts.button"
+          data-i18n-title="alerts.button"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3a5 5 0 0 0-5 5v3.5L5.4 15h13.2L17 11.5V8a5 5 0 0 0-5-5Z" />
+            <path d="M10 18a2 2 0 0 0 4 0" />
+          </svg>
+          <span class="alerts-badge hidden" id="alerts-badge" aria-hidden="true"></span>
+        </button>
+
         <!-- Visitor reference clock: the "your side" of every time difference shown below -->
         <div class="user-clock" id="user-clock">
           <svg class="user-clock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -280,6 +304,89 @@
             <p class="account-welcome" id="account-welcome"></p>
             <p class="account-count" id="account-fav-count"></p>
             <button type="button" class="btn btn-secondary account-signout-btn" id="account-signout-btn" data-i18n="account.signOut">Sign out</button>
+          </div>
+        </div>
+
+        <!-- Weather alerts panel. The same non-modal popover pattern as the
+             account panel: a triggered list, the rule list, and a rule editor.
+             It is anchored to .header-controls so the bell can sit anywhere in
+             the header row. -->
+        <div class="alerts-panel hidden" id="alerts-panel" role="dialog" aria-modal="false" aria-labelledby="alerts-panel-title">
+          <div class="account-panel-head">
+            <h2 class="account-panel-title" id="alerts-panel-title" data-i18n="alerts.panelTitle">Weather alerts</h2>
+            <button type="button" class="account-close-btn" id="alerts-close-btn" aria-label="Close alerts panel" data-i18n-aria-label="alerts.close">
+              <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+              </svg>
+            </button>
+          </div>
+
+          <!-- Signed out: a pointer to the account panel, not a dead form. -->
+          <div class="account-view" id="alerts-signed-out">
+            <p class="account-note" id="alerts-signin-hint" data-i18n="alerts.signInHint">Sign in to set up weather alerts for your saved cities.</p>
+          </div>
+
+          <!-- Signed in: what is happening now, then the rules that decide it. -->
+          <div class="account-view hidden" id="alerts-signed-in">
+            <h3 class="alerts-section-title" data-i18n="alerts.activeHeading">Triggered now</h3>
+            <ul class="alerts-active-list" id="alerts-active-list"></ul>
+            <p class="alerts-empty" id="alerts-active-empty" hidden data-i18n="alerts.noActive">Nothing matching your alerts right now.</p>
+
+            <p class="alerts-status" id="alerts-status" role="status" aria-live="polite"></p>
+
+            <div class="alerts-toolbar">
+              <button type="button" class="btn btn-secondary alerts-add-btn" id="alerts-add-btn" data-i18n="alerts.new">New alert</button>
+              <button type="button" class="btn btn-secondary alerts-refresh-btn" id="alerts-refresh-btn" data-i18n="alerts.check">Check now</button>
+            </div>
+
+            <button type="button" class="btn btn-secondary alerts-notify-btn" id="alerts-notify-btn" hidden data-i18n="alerts.enable">Enable browser notifications</button>
+
+            <form class="alerts-form hidden" id="alerts-form" novalidate>
+              <h3 class="alerts-section-title" id="alerts-form-title" data-i18n="alerts.new">New alert</h3>
+
+              <label class="account-field" for="alerts-city">
+                <span class="account-field-label" data-i18n="alerts.city">City</span>
+                <select id="alerts-city"></select>
+              </label>
+
+              <label class="account-field" for="alerts-metric">
+                <span class="account-field-label" data-i18n="alerts.condition">Condition</span>
+                <select id="alerts-metric"></select>
+              </label>
+
+              <div class="alerts-threshold-row" id="alerts-threshold-row">
+                <label class="account-field alerts-comparator-field" for="alerts-comparator" id="alerts-comparator-row">
+                  <span class="account-field-label" data-i18n="alerts.comparator">Direction</span>
+                  <select id="alerts-comparator">
+                    <option value="above" data-i18n="alerts.above">Above</option>
+                    <option value="below" data-i18n="alerts.below">Below</option>
+                  </select>
+                </label>
+                <label class="account-field" for="alerts-threshold">
+                  <span class="account-field-label" data-i18n="alerts.threshold">Threshold</span>
+                  <span class="alerts-threshold-input">
+                    <input type="number" id="alerts-threshold" step="any" inputmode="decimal" />
+                    <span class="alerts-threshold-unit" id="alerts-threshold-unit"></span>
+                  </span>
+                </label>
+              </div>
+
+              <label class="account-field" for="alerts-window">
+                <span class="account-field-label" data-i18n="alerts.window">Timeframe</span>
+                <select id="alerts-window"></select>
+              </label>
+
+              <p class="account-error" id="alerts-form-error" role="alert" aria-live="assertive" hidden></p>
+
+              <div class="alerts-form-actions">
+                <button type="submit" class="btn btn-search alerts-submit-btn" id="alerts-save-btn" data-i18n="alerts.save">Save alert</button>
+                <button type="button" class="btn btn-secondary" id="alerts-cancel-btn" data-i18n="alerts.cancel">Cancel</button>
+              </div>
+            </form>
+
+            <h3 class="alerts-section-title" data-i18n="alerts.rulesHeading">Your alerts</h3>
+            <ul class="alerts-rules-list" id="alerts-rules-list"></ul>
+            <p class="alerts-empty" id="alerts-rules-empty" hidden></p>
           </div>
         </div>
       </div>
@@ -1029,6 +1136,8 @@
   <!-- Pure camera discovery logic (bbox query, ranking, cadence), no DOM access -->
   <script src="cameras.js"></script>
   <script src="favorites.js"></script>
+  <!-- Pure weather-alert logic (thresholds, windows, verdicts), no DOM access -->
+  <script src="alerts.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -327,6 +327,16 @@
     return typeof value === 'string' ? value : '';
   }
 
+  /**
+   * A loose copy of an alert-rule list. `favorites.js` deliberately does not
+   * validate a rule's shape - that is `alerts.js`'s job, on both the client and
+   * the server - but it does bound the array so a hand-edited request cannot
+   * ask to store an unbounded payload.
+   */
+  function asAlertList(value) {
+    return Array.isArray(value) ? value.slice(0, 200) : [];
+  }
+
   function mapStatus(status, payload) {
     const code = payload && typeof payload.code === 'string' && KNOWN_ERROR_CODES[payload.code]
       ? payload.code
@@ -429,6 +439,7 @@
         token: token,
         username: asString(user.username) || asString(payload && payload.username) || fallbackUsername,
         favorites: sanitizeFavorites(payload && payload.favorites),
+        alerts: asAlertList(payload && payload.alerts),
       };
     }
 
@@ -472,6 +483,7 @@
         return {
           username: asString(user.username) || asString(payload && payload.username),
           favorites: sanitizeFavorites(payload && payload.favorites),
+          alerts: asAlertList(payload && payload.alerts),
         };
       },
 
@@ -488,6 +500,21 @@
           body: { favorites: sanitizeFavorites(favorites) },
         });
         return sanitizeFavorites(payload && payload.favorites);
+      },
+
+      /** The account's alert rules; the alerts engine fixes their shape. */
+      async getAlerts(token) {
+        const payload = await request('GET', '/api/alerts', { token: token });
+        return asAlertList(payload && payload.alerts);
+      },
+
+      /** Replaces the alert rules with `alerts`, returning what was stored. */
+      async saveAlerts(token, alerts) {
+        const payload = await request('PUT', '/api/alerts', {
+          token: token,
+          body: { alerts: asAlertList(alerts) },
+        });
+        return asAlertList(payload && payload.alerts);
       },
     };
   }
@@ -683,10 +710,11 @@
           algo: derived.algo,
           createdAt: now(),
           favorites: [],
+          alerts: [],
         };
         store.users[keyOf(credentials.username)] = record;
         writeStore(store);
-        return { token: LOCAL_SESSION_PREFIX + record.username, username: record.username, favorites: [] };
+        return { token: LOCAL_SESSION_PREFIX + record.username, username: record.username, favorites: [], alerts: [] };
       },
 
       async login(username, password) {
@@ -700,6 +728,7 @@
           token: LOCAL_SESSION_PREFIX + record.username,
           username: record.username,
           favorites: sanitizeFavorites(record.favorites),
+          alerts: asAlertList(record.alerts),
         };
       },
 
@@ -710,7 +739,11 @@
 
       async me(token) {
         const found = recordFor(token);
-        return { username: found.record.username, favorites: sanitizeFavorites(found.record.favorites) };
+        return {
+          username: found.record.username,
+          favorites: sanitizeFavorites(found.record.favorites),
+          alerts: asAlertList(found.record.alerts),
+        };
       },
 
       async getFavorites(token) {
@@ -722,6 +755,17 @@
         found.record.favorites = sanitizeFavorites(favorites);
         writeStore(found.store);
         return found.record.favorites;
+      },
+
+      async getAlerts(token) {
+        return asAlertList(recordFor(token).record.alerts);
+      },
+
+      async saveAlerts(token, alerts) {
+        const found = recordFor(token);
+        found.record.alerts = asAlertList(alerts);
+        writeStore(found.store);
+        return found.record.alerts;
       },
     };
   }

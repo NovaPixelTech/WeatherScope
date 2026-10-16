@@ -75,7 +75,7 @@ The mark lives in one 32×32 `viewBox` and scales without loss to any size. It i
 - **Instant Unit Switching**: Toggle between Celsius (**°C**) and Fahrenheit (**°F**) with instantaneous client-side recalculation. Temperature, wind (km/h ↔ mph), and precipitation (mm ↔ in) all follow the toggle, and the choice is remembered in `localStorage`.
 - **Data Freshness**: A "Updated N min ago" stamp (corrected for the city's UTC offset) plus a manual refresh button. Live conditions also auto-refresh every 10 minutes while the dashboard is visible.
 - **Dynamic Theming**: Background palette and glowing ambient orbs automatically adapt to the weather (Clear Day, Night, Rain, Thunderstorm, Snow, or Overcast). Animations respect `prefers-reduced-motion`.
-- **Zero Dependencies**: Pure HTML5, CSS3, and modern Vanilla JavaScript — runs in any web browser without a build step. Node.js is **optional**: it only powers accounts and favorite cities (see [Accounts & favorite cities](#-accounts--favorite-cities)); every forecast feature works without it.
+- **Zero Dependencies**: Pure HTML5, CSS3, and modern Vanilla JavaScript — runs in any web browser without a build step. Node.js is **optional**: it only powers accounts, favorite cities and weather alerts (see [Accounts & favorite cities](#-accounts--favorite-cities)); every forecast feature works without it.
 
 ---
 
@@ -315,12 +315,51 @@ Opened as a plain file (`file://`) or served by GitHub Pages, the app still work
 | `GET /api/auth/me` | Restore a session from a stored token. |
 | `GET /api/favorites` | The signed-in account's saved cities. |
 | `PUT /api/favorites` | Replace them (validated, de-duplicated, capped at 24). |
-| `GET /api/health` | Liveness probe. |
+| `GET /api/alerts` | The signed-in account's weather-alert rules. |
+| `PUT /api/alerts` | Replace them (validated, de-duplicated, capped at 50). |
+| `GET /api/health` | Liveness probe (reports the favorites and alerts limits). |
 
 ### Running the tests
 
 ```powershell
 node --test tests/favorites.test.js tests/server.test.js tests/favorites-wiring.test.js
+```
+
+---
+
+## 🔔 Weather alerts
+
+Save a city and you can also decide **when WeatherScope should speak up about it**. An alert is a small rule — a city, a condition, a threshold and a look-ahead window — and the bell beside the account button turns amber with a count the moment one of them matches.
+
+### What you can watch
+
+| Group | Conditions | Threshold |
+| --- | --- | --- |
+| **Rain** | Rain chance, rain amount | % or mm/in |
+| **Snow** | Snowfall | cm |
+| **Temperature** | Temperature, feels-like | °C/°F, above or below |
+| **Wind** | Wind speed, wind gusts | km/h or mph |
+| **Thunderstorm** | WMO severe codes (95 / 96 / 99) | presence only |
+| **UV** | UV index | index value |
+
+### Windows
+
+Every alert looks ahead over exactly one window: the **next 1, 2, 3, 6, 12 or 24 hours**, **today**, **tomorrow**, the **next 3 days** or the **next 7 days**. Hour and day windows resolve against the **city's own local clock** — "today" in Tokyo means today in Tokyo, not where you are. A measured condition triggers on the window's maximum (for "above") or minimum (for "below"); a thunderstorm triggers on presence alone.
+
+### Where the rules live, and how they are checked
+
+- **Rules live on the account**, like favorite cities: `data/users.json` on the `node server.js` backend, the browser-only store otherwise. Both sides validate with the same **`alerts.js`** engine, so a rule one side accepts is exactly what the other accepts.
+- **Verdicts are recomputed** from forecasts the page already fetches: the current city reuses the forecast on screen, each other saved city is fetched once and cached for ten minutes. Checks run on load, every ten minutes while the tab is open, and whenever a rule changes.
+- **Thresholds are stored in canonical units** (°C, mm, cm, km/h) and only converted for display, so switching °C/°F or km/h/mph never rewrites a rule.
+
+### The honest limit of a static host
+
+A page can only notice a change **while it is open**, and GitHub Pages cannot wake a closed tab. So a matching rule is always shown in the panel, and — only if you allow browser notifications — is also raised as a real notification, and **only on the moment a rule starts to hold** rather than on every check. There is no service worker and no push backend; the panel says so rather than pretending otherwise.
+
+### Running the tests
+
+```powershell
+node --test tests/alerts.test.js tests/alerts-wiring.test.js
 ```
 
 ---
@@ -608,7 +647,8 @@ WeatherScope/
 ├── compare.js        # Compare Locations engine (pure: selection, metrics, thresholds, insights)
 ├── share.js          # Shared forecast links engine (pure: city + card deep links, validation)
 ├── favorites.js      # Favorites + account validation engine & API client (shared by app.js and server.js)
-├── server.js         # Zero-dependency Node static + accounts/favorites API server (node server.js)
+├── alerts.js         # Weather-alert engine: constants, validation, window resolution, verdicts (shared, no DOM)
+├── server.js         # Zero-dependency Node static + accounts/favorites/alerts API server (node server.js)
 ├── tests/
 │   ├── advice.test.js         # Recommendation logic: thresholds, units, scope, missing data, determinism
 │   ├── wiring.test.js         # Dashboard glue: global, script order, element bindings, escaping, styling
@@ -620,10 +660,12 @@ WeatherScope/
 │   ├── share.test.js          # Share links: deep-link format, card vocabulary, hostile params, arrival wiring
 │   ├── favorites.test.js      # Favorites engine + API client: validation, dedupe, request contract
 │   ├── favorites-wiring.test.js # Accounts/favorites glue: script order, element ids, placement, i18n, escaping
-│   ├── server.test.js         # The API server: auth, sessions, favorites round-trips, bad input, rate limits
+│   ├── alerts.test.js         # Alert engine: thresholds, windows, city-local clocks, verdicts, hostile input
+│   ├── alerts-wiring.test.js  # Weather-alert glue: script order, element ids, placement, i18n, escaping
+│   ├── server.test.js         # The API server: auth, sessions, favorites & alerts round-trips, bad input, rate limits
 │   └── storage-keys.test.js   # The SkyCast rename: legacy unit/city/cache migration, and that it never clobbers
 ├── start-server.ps1  # Launcher: node server.js when Node is present, else a static-only PowerShell server
-├── data/             # Created at runtime: users.json (username, salted password hash, saved cities)
+├── data/             # Created at runtime: users.json (username, salted password hash, saved cities, alert rules)
 └── README.md         # Documentation and project overview
 ```
 
@@ -641,7 +683,7 @@ The app used to be called **SkyCast**. The rename touched three separate layers,
 
 The storage keys are the only part that could actually hurt someone, so they are migrated rather than renamed in place. `readStored()` / `writeStored()` at the top of `app.js` adopt a pre-rename value the first time the new key is read, write everything new under the new name, and delete the old key on the way through. A value already stored under the new name always wins, so a half-migrated profile can never regress. `tests/storage-keys.test.js` holds all of that in place — it boots the real `app.js` against a seeded storage map.
 
-Nothing about you is stored beyond the unit toggle and the last city you looked at, and the selected rain window remains session-only. If you sign in, your username, a salted password hash and your saved cities live on the WeatherScope server rather than in the browser — see [Accounts & favorite cities](#-accounts--favorite-cities).
+Nothing about you is stored beyond the unit toggle and the last city you looked at, and the selected rain window remains session-only. If you sign in, your username, a salted password hash, your saved cities and your weather-alert rules live on the WeatherScope server rather than in the browser — see [Accounts & favorite cities](#-accounts--favorite-cities) and [Weather alerts](#-weather-alerts).
 
 ### Running the tests
 

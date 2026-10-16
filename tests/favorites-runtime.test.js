@@ -8,10 +8,12 @@
  * `file://`), so there is *no* `/api` at all, and account creation has to fall
  * back to the browser store instead of dying on a 404.
  *
- * So this file boots `favorites.js` and `app.js` against a hand-written DOM stub
- * whose `fetch` answers every `/api/*` request with a 404 - exactly what a
- * static host does - then drives the account form the way a visitor would:
- * open the panel, switch to "create account", fill it in, submit.
+ * So this file boots `favorites.js`, `alerts.js` and `app.js` against a
+ * hand-written DOM stub whose `fetch` answers every `/api/*` request with a 404
+ * - exactly what a static host does - then drives the account form the way a
+ * visitor would: open the panel, switch to "create account", fill it in, submit.
+ * It then drives the alert bell the same way, where the only backend is the
+ * browser store.
  *
  *     node --test
  */
@@ -27,6 +29,7 @@ const read = (name) => fs.readFileSync(path.join(ROOT, name), 'utf8');
 
 const appSource = read('app.js');
 const favoritesSource = read('favorites.js');
+const alertsSource = read('alerts.js');
 const html = read('index.html');
 
 // ==========================================================================
@@ -284,6 +287,7 @@ function bootStaticHost() {
 
   vm.createContext(sandbox);
   vm.runInContext(favoritesSource, sandbox, { filename: 'favorites.js' });
+  vm.runInContext(alertsSource, sandbox, { filename: 'alerts.js' });
   vm.runInContext(appSource, sandbox, { filename: 'app.js' });
 
   return {
@@ -409,9 +413,83 @@ test('the local store survives a fresh boot of the same browser', async () => {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(favoritesSource, sandbox, { filename: 'favorites.js' });
+  vm.runInContext(alertsSource, sandbox, { filename: 'alerts.js' });
   vm.runInContext(appSource, sandbox, { filename: 'app.js' });
   for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
 
   // The stored local session is picked back up without touching the network.
   assert.match(registry.get('account-welcome').textContent, /Carol/);
 });
+
+// ==========================================================================
+// Weather alerts, on the same static host
+// ==========================================================================
+test('the alert bell is offered once the engine is present, and explains itself signed out', async () => {
+  const app = bootStaticHost();
+  await app.flush();
+
+  // alerts.js loaded, so the bell is on screen rather than hidden.
+  assert.ok(app.sandbox.WeatherScopeAlerts, 'the alert engine is missing');
+  assert.equal(app.el('alerts-btn').classList.contains('hidden'), false, 'the bell should be offered');
+  assert.equal(app.el('alerts-badge').classList.contains('hidden'), true, 'an empty badge must hide');
+  assert.match(app.el('alerts-panel-title').textContent, /alert/i);
+
+  // Signed out the panel holds a pointer to the account form, not a dead form.
+  assert.equal(app.el('alerts-signed-out').classList.contains('hidden'), false);
+  assert.equal(app.el('alerts-signed-in').classList.contains('hidden'), true);
+  assert.match(app.el('alerts-signin-hint').textContent, /sign in/i);
+});
+
+test('the bell toggles the panel, and only one popover is open at a time', async () => {
+  const app = bootStaticHost();
+  await app.flush();
+
+  // The stub does not parse the markup's attributes, so seed the closed state
+  // the panel's `class="alerts-panel hidden"` would have carried on a real load.
+  app.el('alerts-panel').classList.add('hidden');
+  assert.equal(app.el('alerts-panel').classList.contains('hidden'), true, 'the panel starts closed');
+
+  app.el('alerts-btn').click();
+  assert.equal(app.el('alerts-panel').classList.contains('hidden'), false, 'the bell did not open the panel');
+  assert.equal(app.el('alerts-btn').getAttribute('aria-expanded'), 'true');
+
+  app.el('alerts-btn').click();
+  assert.equal(app.el('alerts-panel').classList.contains('hidden'), true, 'the bell did not close the panel');
+
+  // Opening the account panel closes the alerts panel rather than stacking them.
+  app.el('alerts-btn').click();
+  app.el('account-btn').click();
+  assert.equal(app.el('alerts-panel').classList.contains('hidden'), true, 'two popovers stayed open');
+});
+
+test('signing in with no rules shows both empty states, and New alert asks for a favorite first', async () => {
+  const app = bootStaticHost();
+  await app.flush();
+
+  app.el('auth-username').value = 'Dana';
+  app.el('auth-password').value = 'yet another long password';
+  app.el('account-mode-register').click();
+  app.el('account-form').dispatch('submit');
+  await app.flush();
+
+  // Signed in, so the alerts panel flips to its real view...
+  assert.equal(app.el('alerts-signed-in').classList.contains('hidden'), false);
+  assert.equal(app.el('alerts-signed-out').classList.contains('hidden'), true);
+  // ...with both empty states spoken from translated strings.
+  assert.equal(app.el('alerts-rules-empty').classList.contains('hidden'), false);
+  assert.match(app.el('alerts-rules-empty').textContent, /no weather alerts/i);
+  assert.equal(app.el('alerts-active-empty').classList.contains('hidden'), false);
+  assert.equal(app.el('alerts-badge').classList.contains('hidden'), true);
+
+  // With no saved city there is nothing to alert on, so the app says so rather
+  // than opening a form whose city menu would be empty.
+  app.el('alerts-btn').click();
+  app.el('alerts-add-btn').click();
+  assert.match(app.el('alerts-status').textContent, /favorite/i);
+  assert.equal(app.el('alerts-form').classList.contains('hidden'), true, 'the form should stay closed');
+
+  // No alert path threw.
+  const alertErrors = app.logged.filter((line) => /error/i.test(line) && /alert/i.test(line));
+  assert.deepEqual(alertErrors, [], 'the alert flow logged an error');
+});
+

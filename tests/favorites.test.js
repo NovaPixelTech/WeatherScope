@@ -469,6 +469,52 @@ test('saveFavorites sends only cities the engine accepts, and returns what was s
   assert.deepEqual(saved, sent.favorites);
 });
 
+test('getAlerts and saveAlerts round-trip a rule list on the same contract', async () => {
+  const rule = {
+    id: 'r1', cityKey: '48.8566,2.3522', cityName: 'Paris', metric: 'rainChance',
+    comparator: 'above', threshold: 60, window: 'h2', enabled: true,
+  };
+  const fetchFn = recordingFetch((url, options) => {
+    if (options.method === 'PUT') {
+      return jsonResponse(200, { ok: true, alerts: JSON.parse(options.body).alerts });
+    }
+    return jsonResponse(200, { ok: true, alerts: [rule] });
+  });
+  const client = F.createClient({ fetchFn: fetchFn, timeoutMs: 0 });
+
+  const read = await client.getAlerts('tok-9');
+  assert.equal(read.length, 1);
+  assert.equal(read[0].cityName, 'Paris');
+  assert.equal(fetchFn.calls[0].url, '/api/alerts');
+  assert.equal(fetchFn.calls[0].options.headers.Authorization, 'Bearer tok-9');
+
+  const saved = await client.saveAlerts('tok-9', [rule]);
+  assert.equal(fetchFn.calls[1].options.method, 'PUT');
+  assert.equal(JSON.parse(fetchFn.calls[1].options.body).alerts.length, 1);
+  assert.deepEqual(saved, [rule]);
+});
+
+test('getAlerts tolerates a payload that is not a list', async () => {
+  const client = F.createClient({
+    fetchFn: recordingFetch(jsonResponse(200, { ok: true, alerts: 'nope' })),
+    timeoutMs: 0,
+  });
+  assert.deepEqual(await client.getAlerts('tok'), []);
+});
+
+test('register and login hand back the account alerts alongside its favorites', async () => {
+  const rule = { id: 'r1', cityKey: '0,0', cityName: 'X', metric: 'wind', comparator: 'above', threshold: 40, window: 'h1' };
+  const client = F.createClient({
+    fetchFn: recordingFetch(jsonResponse(201, {
+      ok: true, token: 't', user: { username: 'Alice' }, favorites: [], alerts: [rule],
+    })),
+    timeoutMs: 0,
+  });
+  const account = await client.register('Alice', 'correct horse battery');
+  assert.equal(account.alerts.length, 1);
+  assert.equal(account.alerts[0].metric, 'wind');
+});
+
 test('logout is best-effort: it sends the token, and an unreachable server is not an error', async () => {
   const ok = recordingFetch(jsonResponse(200, { ok: true }));
   await F.createClient({ fetchFn: ok, timeoutMs: 0 }).logout('tok');
@@ -562,7 +608,7 @@ function localClient(storage) {
 
 test('the local client exposes the same contract as the API client', () => {
   const client = localClient(memoryStorage());
-  ['register', 'login', 'logout', 'me', 'getFavorites', 'saveFavorites'].forEach((method) => {
+  ['register', 'login', 'logout', 'me', 'getFavorites', 'saveFavorites', 'getAlerts', 'saveAlerts'].forEach((method) => {
     assert.equal(typeof client[method], 'function', `local client is missing ${method}`);
   });
   assert.equal(client.available, true);
@@ -623,6 +669,31 @@ test('local favorites round-trip through saveFavorites, sanitized', async () => 
 
   assert.deepEqual(await client.getFavorites(created.token), saved);
   assert.deepEqual((await client.me(created.token)).favorites, saved);
+});
+
+test('local alerts round-trip through saveAlerts, and a fresh account has none', async () => {
+  const client = localClient(memoryStorage());
+  const created = await client.register('Alice', 'long enough password');
+  assert.deepEqual(created.alerts, []);
+
+  const rule = {
+    id: 'r1', cityKey: '48.8566,2.3522', cityName: 'Paris', metric: 'rainChance',
+    comparator: 'above', threshold: 60, window: 'h2', enabled: true,
+  };
+  const saved = await client.saveAlerts(created.token, [rule]);
+  assert.equal(saved.length, 1);
+  assert.deepEqual(await client.getAlerts(created.token), saved);
+  assert.deepEqual((await client.me(created.token)).alerts, saved);
+
+  // Rules survive a sign-out / sign-in cycle, like favorites.
+  const again = await client.login('alice', 'long enough password');
+  assert.deepEqual(again.alerts, saved);
+});
+
+test('local alerts are not readable or writable without a live session', async () => {
+  const client = localClient(memoryStorage());
+  await assert.rejects(() => client.getAlerts('local:Ghost'), (err) => err.code === 'unauthorized');
+  await assert.rejects(() => client.saveAlerts('local:Ghost', []), (err) => err.code === 'unauthorized');
 });
 
 test('a token that names no local account is unauthorized', async () => {

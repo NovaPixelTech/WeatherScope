@@ -378,6 +378,82 @@ test('the favorites list is not reachable without a session', async () => {
 });
 
 // ==========================================================================
+// 4b. Alerts - the same whole-collection contract as favorites
+// ==========================================================================
+test('alerts are saved, sanitized and read back', async () => {
+  const app = await boot();
+  try {
+    const register = await app.request('POST', '/api/auth/register', {
+      body: { username: 'Alice', password: 'correct horse battery' },
+    });
+    assert.deepEqual(register.payload.alerts, [], 'a fresh account has no rules');
+    const token = register.payload.token;
+
+    const put = await app.request('PUT', '/api/alerts', {
+      token: token,
+      body: {
+        alerts: [
+          { id: 'rain-1', cityKey: '48.8566,2.3522', cityName: 'Paris', metric: 'rainChance', comparator: 'above', threshold: 60, window: 'h2', enabled: true, createdAt: 5 },
+          { id: 'rain-1', cityKey: '48.8566,2.3522', cityName: 'Paris', metric: 'rainChance', comparator: 'above', threshold: 60, window: 'h2' },
+          { cityKey: 'not-coords', cityName: 'Paris', metric: 'rainChance', window: 'h2' },
+          { cityKey: '0,0', cityName: 'Nowhere', metric: 'made-up', window: 'h2' },
+        ],
+      },
+    });
+
+    assert.equal(put.status, 200);
+    assert.equal(put.payload.alerts.length, 1, 'duplicates and junk must collapse');
+    assert.equal(put.payload.alerts[0].cityName, 'Paris');
+
+    const get = await app.request('GET', '/api/alerts', { token: token });
+    assert.equal(get.status, 200);
+    assert.equal(get.payload.alerts.length, 1);
+    assert.equal(get.payload.alerts[0].window, 'h2');
+
+    // A later sign-in hands the rules back with the account.
+    const login = await app.request('POST', '/api/auth/login', {
+      body: { username: 'Alice', password: 'correct horse battery' },
+    });
+    assert.equal(login.payload.alerts.length, 1);
+
+    const me = await app.request('GET', '/api/auth/me', { token: token });
+    assert.equal(me.payload.alerts.length, 1);
+  } finally {
+    await app.close();
+  }
+});
+
+test('alerts cannot be replaced with something that is not a list', async () => {
+  const app = await boot();
+  try {
+    const register = await app.request('POST', '/api/auth/register', {
+      body: { username: 'Alice', password: 'correct horse battery' },
+    });
+    const bad = await app.request('PUT', '/api/alerts', {
+      token: register.payload.token,
+      body: { alerts: 'rain' },
+    });
+    assert.equal(bad.status, 400);
+    assert.equal(bad.payload.code, 'invalid');
+  } finally {
+    await app.close();
+  }
+});
+
+test('the alerts list is not reachable without a session', async () => {
+  const app = await boot();
+  try {
+    const read = await app.request('GET', '/api/alerts');
+    assert.equal(read.status, 401);
+
+    const write = await app.request('PUT', '/api/alerts', { body: { alerts: [] } });
+    assert.equal(write.status, 401);
+  } finally {
+    await app.close();
+  }
+});
+
+// ==========================================================================
 // 5. Storage
 // ==========================================================================
 test('accounts and favorites survive a restart, passwords do not', async () => {
@@ -394,6 +470,15 @@ test('accounts and favorites survive a restart, passwords do not', async () => {
     await first.request('PUT', '/api/favorites', {
       token: token,
       body: { favorites: [{ name: 'Tokyo', latitude: 35.6762, longitude: 139.6503, timezone: 'Asia/Tokyo' }] },
+    });
+    await first.request('PUT', '/api/alerts', {
+      token: token,
+      body: {
+        alerts: [{
+          id: 'tokyo-rain', cityKey: '35.6762,139.6503', cityName: 'Tokyo',
+          metric: 'rainChance', comparator: 'above', threshold: 50, window: 'h2',
+        }],
+      },
     });
   } finally {
     await first.close();
@@ -419,6 +504,8 @@ test('accounts and favorites survive a restart, passwords do not', async () => {
     assert.equal(login.status, 200);
     assert.equal(login.payload.favorites.length, 1);
     assert.equal(login.payload.favorites[0].name, 'Tokyo');
+    assert.equal(login.payload.alerts.length, 1);
+    assert.equal(login.payload.alerts[0].cityName, 'Tokyo');
   } finally {
     await second.close();
   }

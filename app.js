@@ -253,6 +253,7 @@
       token: '',
       username: '',
       favorites: [],
+      alerts: [], // the account's alert rules, always run through the alerts engine
       available: null, // null = not yet known, true/false once probed
       backend: '', // '' = undecided, 'server' = Node API, 'local' = this browser
       serverAvailable: null, // null until `api/health` answers
@@ -263,6 +264,24 @@
     },
     // Guards a stale favorites write from landing after a newer one.
     favoritesSeq: 0,
+    // Weather alerts. The rules live on the account (`auth.alerts`); these are
+    // the *verdicts*, recomputed from the forecast the page already has. The
+    // results are keyed by rule id so the panel and the badge can be repainted
+    // without re-evaluating. `cache` holds one forecast per saved city for a few
+    // minutes; `hydrated` records that the first pass has run, so opening the
+    // app never fires a burst of notifications for conditions already in force.
+    alerts: {
+      results: {}, // ruleId -> engine result
+      active: [], // [{ rule, result, cityName }] for the currently-triggered rules
+      cache: {}, // cityKey -> { forecast, at }
+      running: false,
+      timer: null,
+      hydrated: false,
+      permission: 'unsupported', // 'unsupported' | 'default' | 'granted' | 'denied'
+      status: '',
+      editingId: '', // '' = form closed, 'new' = a new rule, else the rule id
+      draft: null, // the rule the form is editing
+    },
   };
 
   const THEME_CLASSES = [
@@ -820,6 +839,39 @@
     favoritesChips: document.getElementById('favorites-chips'),
     favoritesStatus: document.getElementById('favorites-status'),
     favoriteBtn: document.getElementById('favorite-btn'),
+
+    // Weather alerts - a bell in the header opening a non-modal panel, plus the
+    // rule editor inside it. Every node is read once here; the render layer only
+    // ever writes textContent into them.
+    alertsBtn: document.getElementById('alerts-btn'),
+    alertsBadge: document.getElementById('alerts-badge'),
+    alertsPanel: document.getElementById('alerts-panel'),
+    alertsPanelTitle: document.getElementById('alerts-panel-title'),
+    alertsCloseBtn: document.getElementById('alerts-close-btn'),
+    alertsSignedOut: document.getElementById('alerts-signed-out'),
+    alertsSignedIn: document.getElementById('alerts-signed-in'),
+    alertsSignInHint: document.getElementById('alerts-signin-hint'),
+    alertsActiveList: document.getElementById('alerts-active-list'),
+    alertsActiveEmpty: document.getElementById('alerts-active-empty'),
+    alertsStatus: document.getElementById('alerts-status'),
+    alertsAddBtn: document.getElementById('alerts-add-btn'),
+    alertsRefreshBtn: document.getElementById('alerts-refresh-btn'),
+    alertsNotifyBtn: document.getElementById('alerts-notify-btn'),
+    alertsRulesList: document.getElementById('alerts-rules-list'),
+    alertsRulesEmpty: document.getElementById('alerts-rules-empty'),
+    alertsForm: document.getElementById('alerts-form'),
+    alertsFormTitle: document.getElementById('alerts-form-title'),
+    alertsCity: document.getElementById('alerts-city'),
+    alertsMetric: document.getElementById('alerts-metric'),
+    alertsComparator: document.getElementById('alerts-comparator'),
+    alertsComparatorRow: document.getElementById('alerts-comparator-row'),
+    alertsThreshold: document.getElementById('alerts-threshold'),
+    alertsThresholdRow: document.getElementById('alerts-threshold-row'),
+    alertsThresholdUnit: document.getElementById('alerts-threshold-unit'),
+    alertsWindow: document.getElementById('alerts-window'),
+    alertsFormError: document.getElementById('alerts-form-error'),
+    alertsSaveBtn: document.getElementById('alerts-save-btn'),
+    alertsCancelBtn: document.getElementById('alerts-cancel-btn'),
 
     cityName: document.getElementById('city-name'),
     locationMeta: document.getElementById('location-meta'),
@@ -2881,6 +2933,8 @@
       me: function (token) { return clientFor(token).me(token); },
       getFavorites: function (token) { return clientFor(token).getFavorites(token); },
       saveFavorites: function (token, favorites) { return clientFor(token).saveFavorites(token, favorites); },
+      getAlerts: function (token) { return clientFor(token).getAlerts(token); },
+      saveAlerts: function (token, alerts) { return clientFor(token).saveAlerts(token, alerts); },
     };
     return favoritesClient;
   }
@@ -3146,6 +3200,7 @@
 
   function openAccountPanel() {
     if (!elements.accountPanel) return;
+    closeAlertsPanel(); // only one popover at a time
     elements.accountPanel.classList.remove('hidden');
     if (elements.accountBtn) elements.accountBtn.setAttribute('aria-expanded', 'true');
     renderAccountUI();
@@ -3235,6 +3290,7 @@
       state.auth.username = account.username || stored.username;
       writeStoredSession({ token: state.auth.token, username: state.auth.username });
       applyFavorites(account.favorites);
+      applyAlerts(account.alerts);
     } catch (err) {
       const engine = favoritesEngine();
       const code = engine ? engine.apiErrorCode(err) : 'server';
@@ -3259,6 +3315,7 @@
     state.auth.lastError = '';
     writeStoredSession(null);
     applyFavorites([]);
+    applyAlerts([]);
   }
 
   async function submitAccountForm() {
@@ -3298,6 +3355,7 @@
       if (elements.authPassword) elements.authPassword.value = '';
 
       applyFavorites(result.favorites);
+      applyAlerts(result.alerts);
       closeAccountPanel();
       announceFavorites(
         t('account.welcome', { username: state.auth.username }, `Signed in as ${state.auth.username}.`)
@@ -3375,6 +3433,7 @@
 
     const label = engine.describeCity(city) || city.name;
     applyFavorites(result.list);
+    if (wasSaved) removeAlertsForCity(engine.cityKey(city));
     announceFavorites(
       wasSaved
         ? t('favorites.removed', { city: label }, `${label} removed from your favorites.`)
@@ -3394,6 +3453,7 @@
 
     applyFavorites(result.list);
     if (label) announceFavorites(t('favorites.removed', { city: label }, `${label} removed from your favorites.`));
+    removeAlertsForCity(key);
     await persistFavorites();
   }
 
@@ -3414,6 +3474,764 @@
       loadCityWeather(city);
     }
   }
+
+  // ==========================================================================
+  // Weather Alerts
+  // --------------------------------------------------------------------------
+  // A rule belongs to the account, like a favorite, but it answers a different
+  // question: *when should WeatherScope speak up?* The verdicts are recomputed
+  // here from the forecast the page already fetches - for the city on screen it
+  // reuses `state.weatherData`, and for every other saved city it fetches once
+  // and caches the payload for a few minutes. A triggered rule is listed in the
+  // panel, and if the visitor allowed it, is also raised as a real browser
+  // notification. That is the honest limit of a static host: the page can only
+  // notice a change while it is open, so the panel never promises more.
+  // ==========================================================================
+  const ALERT_CACHE_TTL = 10 * 60 * 1000;
+  const ALERT_REFRESH_INTERVAL = 10 * 60 * 1000;
+
+  /** The order the timeframe picker lists windows in, shortest first. */
+  const ALERT_WINDOW_ORDER = ['h1', 'h2', 'h3', 'h6', 'h12', 'h24', 'today', 'tomorrow', 'd3', 'd7'];
+
+  const ALERT_METRIC_FALLBACK = {
+    rainChance: 'Rain chance', rainAmount: 'Rain amount', snow: 'Snow',
+    temperature: 'Temperature', apparent: 'Feels-like temperature',
+    wind: 'Wind', gust: 'Wind gusts', storm: 'Thunderstorm', uv: 'UV index',
+  };
+  const ALERT_WINDOW_FALLBACK = { today: 'Today', tomorrow: 'Tomorrow', d3: 'Next 3 days', d7: 'Next 7 days' };
+
+  function alertsEngine() {
+    return window.WeatherScopeAlerts || null;
+  }
+
+  function cityKeyOf(city) {
+    const engine = favoritesEngine();
+    return engine && city ? engine.cityKey(city) : '';
+  }
+
+  function findFavoriteByKey(key) {
+    const engine = favoritesEngine();
+    return engine ? engine.findFavorite(state.auth.favorites, key) : null;
+  }
+
+  function roundDisplay(value) {
+    return Math.round(value * 10) / 10;
+  }
+
+  function metricLabel(id) {
+    return t('alerts.metric.' + id, null, ALERT_METRIC_FALLBACK[id] || id);
+  }
+
+  function windowLabel(id) {
+    const engine = alertsEngine();
+    const def = engine ? engine.WINDOWS[id] : null;
+    if (ALERT_WINDOW_FALLBACK[id]) return t('alerts.window.' + id, null, ALERT_WINDOW_FALLBACK[id]);
+    if (def && def.kind === 'hours') return t('alerts.window.hours', { hours: def.hours }, `Next ${def.hours} h`);
+    return t('alerts.window.' + id, null, id);
+  }
+
+  /** A reading in the metric's own unit, following the °C/°F and km/h/mph toggle. */
+  function formatAlertValue(metricId, value) {
+    const engine = alertsEngine();
+    const metric = engine ? engine.METRICS[metricId] : null;
+    if (!metric) return '';
+    if (metric.kind === 'code') return t('alerts.metric.storm', null, 'Thunderstorm');
+    if (value === null || value === undefined || isNaN(value)) return '';
+    if (metric.unit === '°C') return formatTemp(value) + getTempUnitSymbol();
+    if (metric.unit === 'km/h') return formatWindSpeed(value) + ' ' + getWindUnitSymbol();
+    if (metric.unit === 'mm') return formatPrecip(value) + ' ' + getPrecipUnitSymbol();
+    if (metric.unit === '%') return Math.round(value) + '%';
+    if (metric.unit === 'cm') return roundDisplay(value) + ' cm';
+    return String(roundDisplay(value));
+  }
+
+  function thresholdUnitLabel(metric) {
+    if (metric.unit === '°C') return getTempUnitSymbol();
+    if (metric.unit === 'km/h') return getWindUnitSymbol();
+    if (metric.unit === 'mm') return getPrecipUnitSymbol();
+    return metric.unit || '';
+  }
+
+  /** A value the visitor typed, in the active display unit, as the engine stores it. */
+  function toCanonicalThreshold(metric, entered) {
+    if (state.unit === 'fahrenheit' && metric.unit === '°C') return fahrenheitToCelsius(entered);
+    if (state.unit === 'fahrenheit' && metric.unit === 'km/h') return entered / 0.621371;
+    if (state.unit === 'fahrenheit' && metric.unit === 'mm') return entered / 0.0393701;
+    return entered;
+  }
+
+  /** A stored threshold, shown in the active display unit. */
+  function toDisplayThreshold(metric, canonical) {
+    if (state.unit === 'fahrenheit' && metric.unit === '°C') return roundDisplay(celsiusToFahrenheit(canonical));
+    if (state.unit === 'fahrenheit' && metric.unit === 'km/h') return roundDisplay(kmhToMph(canonical));
+    if (state.unit === 'fahrenheit' && metric.unit === 'mm') return roundDisplay(canonical * 0.0393701);
+    return roundDisplay(canonical);
+  }
+
+  /** "Rain chance ≥ 60% · Next 2 h" - one rule, in words, in the active language. */
+  function ruleSummary(rule) {
+    const engine = alertsEngine();
+    const metric = engine ? engine.METRICS[rule.metric] : null;
+    const label = metricLabel(rule.metric);
+    const when = windowLabel(rule.window);
+    if (!metric || metric.kind === 'code') return label + ' · ' + when;
+    const op = rule.comparator === 'below' ? '≤' : '≥';
+    return label + ' ' + op + ' ' + formatAlertValue(rule.metric, rule.threshold) + ' · ' + when;
+  }
+
+  /** The city-local "HH:MM" an hourly time string names. */
+  function hourLabel(timeStr) {
+    return typeof timeStr === 'string' && timeStr.length >= 16 ? timeStr.slice(11, 16) : '';
+  }
+
+  function alertEntryText(entry) {
+    let text = ruleSummary(entry.rule);
+    const value = formatAlertValue(entry.rule.metric, entry.result.value);
+    if (value) text += ' — ' + value;
+    const time = hourLabel(entry.result.valueTime);
+    if (time) text += ' ' + t('alerts.at', { time: time }, `at ${time}`);
+    return text;
+  }
+
+  function setAlertStatus(text) {
+    state.alerts.status = text || '';
+    if (elements.alertsStatus) elements.alertsStatus.textContent = state.alerts.status;
+  }
+
+  function setAlertFormError(text) {
+    if (!elements.alertsFormError) return;
+    if (text) {
+      elements.alertsFormError.textContent = text;
+      elements.alertsFormError.hidden = false;
+    } else {
+      elements.alertsFormError.textContent = '';
+      elements.alertsFormError.hidden = true;
+    }
+  }
+
+  /** Forgets every verdict, so a new rule set is judged from scratch. */
+  function resetAlertResults() {
+    state.alerts.results = {};
+    state.alerts.active = [];
+    state.alerts.hydrated = false;
+  }
+
+  // --- Evaluation ---------------------------------------------------------
+
+  /** The forecast for a saved city: the one on screen, a fresh cache entry, or one fetch. */
+  async function getAlertForecast(city) {
+    const key = cityKeyOf(city);
+    if (state.currentCity && cityKeyOf(state.currentCity) === key && state.weatherData) {
+      return state.weatherData;
+    }
+    const cached = state.alerts.cache[key];
+    if (cached && Date.now() - cached.at < ALERT_CACHE_TTL) return cached.forecast;
+    const forecast = await fetchWeatherData(city.latitude, city.longitude, city.timezone || 'auto');
+    state.alerts.cache[key] = { forecast: forecast, at: Date.now() };
+    return forecast;
+  }
+
+  /**
+   * Evaluates every enabled rule against its city's latest forecast. A rule that
+   * has just started to hold (and was already being watched) raises a browser
+   * notification, which is the only moment anything can be pushed - the app is
+   * open by definition here.
+   */
+  async function checkAlerts(options) {
+    const opts = options || {};
+    const engine = alertsEngine();
+    if (!engine || state.alerts.running || !state.auth.token) return;
+
+    const rules = state.auth.alerts.filter(function (rule) { return rule.enabled; });
+    if (!rules.length) {
+      state.alerts.results = {};
+      state.alerts.active = [];
+      state.alerts.hydrated = true;
+      renderAlertsBadge();
+      renderAlertsPanel();
+      return;
+    }
+
+    state.alerts.running = true;
+    if (opts.announce) setAlertStatus(t('alerts.checking', null, 'Checking the forecast…'));
+    renderAlertsPanel();
+
+    const previous = state.alerts.results;
+    const results = {};
+    const active = [];
+    const newly = [];
+
+    try {
+      const needed = {};
+      rules.forEach(function (rule) { needed[rule.cityKey] = true; });
+
+      const forecasts = {};
+      await Promise.all(Object.keys(needed).map(async function (key) {
+        const city = findFavoriteByKey(key);
+        if (!city) return;
+        try {
+          forecasts[key] = await getAlertForecast(city);
+        } catch (err) {
+          // A city that will not load simply has no verdict this pass.
+        }
+      }));
+
+      rules.forEach(function (rule) {
+        const forecast = forecasts[rule.cityKey];
+        if (!forecast) return;
+        const result = engine.evaluate(rule, forecast, { nowMs: Date.now() });
+        results[rule.id] = result;
+        if (!result.triggered) return;
+        const city = findFavoriteByKey(rule.cityKey);
+        const entry = { rule: rule, result: result, cityName: city ? city.name : rule.cityName };
+        active.push(entry);
+        const before = previous[rule.id];
+        if (state.alerts.hydrated && before && !before.triggered) newly.push(entry);
+      });
+
+      state.alerts.results = results;
+      state.alerts.active = active;
+      state.alerts.hydrated = true;
+      if (newly.length) raiseAlertNotifications(newly);
+    } catch (err) {
+      // A failed check keeps the previous verdicts rather than clearing them:
+      // a transient network error must not make an active alert disappear.
+    } finally {
+      state.alerts.running = false;
+    }
+
+    if (opts.announce) setAlertStatus(t('alerts.checked', { time: new Date().toLocaleTimeString() }, 'Forecast checked.'));
+    renderAlertsBadge();
+    renderAlertsPanel();
+  }
+
+  function raiseAlertNotifications(entries) {
+    if (state.alerts.permission !== 'granted') return;
+    if (typeof window === 'undefined' || typeof window.Notification !== 'function') return;
+    entries.forEach(function (entry) {
+      try {
+        const title = t('alerts.notificationTitle', { city: entry.cityName }, `Weather alert for ${entry.cityName}`);
+        const notification = new window.Notification(title, {
+          body: alertEntryText(entry),
+          tag: 'weatherscope-alert-' + entry.rule.id,
+        });
+        notification.onclick = function () { try { window.focus(); } catch (err) { /* ignore */ } };
+      } catch (err) {
+        // Notifications are a courtesy; a refused one must never break the panel.
+      }
+    });
+  }
+
+  function startAlertChecks() {
+    if (state.alerts.timer !== null) return;
+    state.alerts.timer = window.setInterval(function () {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') checkAlerts();
+    }, ALERT_REFRESH_INTERVAL);
+  }
+
+  /** Re-evaluates after any account/rule change, or stops when signed out. */
+  function refreshAlerts() {
+    if (!state.auth.token || !alertsEngine()) {
+      if (state.alerts.timer !== null) {
+        window.clearInterval(state.alerts.timer);
+        state.alerts.timer = null;
+      }
+      renderAlertsBadge();
+      renderAlertsPanel();
+      return;
+    }
+    startAlertChecks();
+    checkAlerts();
+  }
+
+  /** Replaces the account's rules, repaints, and re-runs the checks. */
+  function applyAlerts(alerts) {
+    const engine = alertsEngine();
+    state.auth.alerts = engine ? engine.sanitizeAlerts(alerts) : [];
+    state.alerts.results = {};
+    state.alerts.active = [];
+    state.alerts.hydrated = false;
+    refreshAlerts();
+  }
+
+  // --- The panel ----------------------------------------------------------
+
+  function renderAlertsBadge() {
+    const btn = elements.alertsBtn;
+    const badge = elements.alertsBadge;
+    const supported = !!alertsEngine();
+    if (btn) btn.classList.toggle('hidden', !supported);
+    if (!supported) return;
+
+    const count = state.alerts.active.length;
+    if (btn) {
+      const label = count
+        ? t('alerts.buttonActive', { count: count }, `Weather alerts (${count} active)`)
+        : t('alerts.button', null, 'Weather alerts');
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
+      btn.classList.toggle('has-alerts', count > 0);
+    }
+    if (badge) {
+      badge.textContent = count ? String(count) : '';
+      badge.classList.toggle('hidden', count === 0);
+    }
+  }
+
+  function renderAlertsPanel() {
+    if (!elements.alertsPanel) return;
+    const supported = !!alertsEngine();
+    if (!supported) return;
+
+    const signedIn = !!state.auth.token;
+    if (elements.alertsSignedOut) elements.alertsSignedOut.classList.toggle('hidden', signedIn);
+    if (elements.alertsSignedIn) elements.alertsSignedIn.classList.toggle('hidden', !signedIn);
+    if (elements.alertsPanelTitle) elements.alertsPanelTitle.textContent = t('alerts.panelTitle', null, 'Weather alerts');
+    if (elements.alertsSignInHint) {
+      elements.alertsSignInHint.textContent = t('alerts.signInHint', null, 'Sign in to set up weather alerts for your saved cities.');
+    }
+    if (elements.alertsRefreshBtn) elements.alertsRefreshBtn.textContent = t('alerts.check', null, 'Check now');
+
+    if (!signedIn) return;
+
+    renderAlertActive();
+    renderAlertRules();
+    renderAlertFormVisibility();
+    renderAlertNotifyButton();
+    if (elements.alertsStatus) elements.alertsStatus.textContent = state.alerts.status;
+  }
+
+  function renderAlertActive() {
+    const list = elements.alertsActiveList;
+    if (!list) return;
+    list.innerHTML = '';
+    const active = state.alerts.active;
+
+    if (elements.alertsActiveEmpty) {
+      elements.alertsActiveEmpty.textContent = t('alerts.noActive', null, 'Nothing matching your alerts right now.');
+      elements.alertsActiveEmpty.classList.toggle('hidden', active.length > 0);
+    }
+
+    active.forEach(function (entry) {
+      const item = document.createElement('li');
+      item.className = 'alert-active-item';
+
+      const city = document.createElement('span');
+      city.className = 'alert-active-city';
+      city.textContent = entry.cityName;
+
+      const detail = document.createElement('span');
+      detail.className = 'alert-active-detail';
+      detail.textContent = alertEntryText(entry);
+
+      item.appendChild(city);
+      item.appendChild(detail);
+      list.appendChild(item);
+    });
+  }
+
+  function renderAlertRules() {
+    const list = elements.alertsRulesList;
+    if (!list) return;
+    list.innerHTML = '';
+    const rules = state.auth.alerts;
+
+    if (elements.alertsRulesEmpty) {
+      elements.alertsRulesEmpty.textContent = rules.length
+        ? ''
+        : t('alerts.none', null, 'No weather alerts yet. Add one to be told when rain, snow, heat, wind, storms or high UV are coming.');
+      elements.alertsRulesEmpty.classList.toggle('hidden', rules.length > 0);
+    }
+
+    rules.forEach(function (rule) {
+      const summary = ruleSummary(rule);
+      const item = document.createElement('li');
+      item.className = 'alert-rule' + (rule.enabled ? '' : ' is-paused');
+      item.dataset.alertId = rule.id;
+
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'alert-rule-toggle';
+      toggle.dataset.alertToggle = rule.id;
+      toggle.setAttribute('aria-pressed', String(rule.enabled));
+      toggle.title = t('alerts.toggleAria', { city: rule.cityName, summary: summary }, `Pause or resume the alert for ${rule.cityName}: ${summary}`);
+      toggle.textContent = rule.enabled ? '❙❙' : '▶';
+
+      const body = document.createElement('div');
+      body.className = 'alert-rule-body';
+
+      const city = document.createElement('span');
+      city.className = 'alert-rule-city';
+      city.textContent = rule.cityName;
+
+      const detail = document.createElement('span');
+      detail.className = 'alert-rule-summary';
+      detail.textContent = rule.enabled
+        ? summary
+        : summary + ' · ' + t('alerts.paused', null, 'Paused');
+
+      body.appendChild(city);
+      body.appendChild(detail);
+
+      const actions = document.createElement('div');
+      actions.className = 'alert-rule-actions';
+
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'alert-rule-action';
+      edit.dataset.alertEdit = rule.id;
+      edit.title = t('alerts.editAria', { city: rule.cityName, summary: summary }, `Edit the alert for ${rule.cityName}: ${summary}`);
+      edit.setAttribute('aria-label', edit.title);
+      edit.textContent = t('alerts.edit', null, 'Edit');
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'alert-rule-action alert-rule-delete';
+      remove.dataset.alertDelete = rule.id;
+      remove.title = t('alerts.deleteAria', { city: rule.cityName, summary: summary }, `Delete the alert for ${rule.cityName}: ${summary}`);
+      remove.setAttribute('aria-label', remove.title);
+      remove.textContent = t('alerts.delete', null, 'Delete');
+
+      actions.appendChild(edit);
+      actions.appendChild(remove);
+
+      item.appendChild(toggle);
+      item.appendChild(body);
+      item.appendChild(actions);
+      list.appendChild(item);
+    });
+  }
+
+  function renderAlertFormVisibility() {
+    const form = elements.alertsForm;
+    if (!form) return;
+    const editing = state.alerts.editingId !== '';
+    form.classList.toggle('hidden', !editing);
+    if (elements.alertsAddBtn) elements.alertsAddBtn.classList.toggle('hidden', editing);
+    if (editing && elements.alertsFormTitle) {
+      elements.alertsFormTitle.textContent = state.alerts.editingId === 'new'
+        ? t('alerts.new', null, 'New alert')
+        : t('alerts.edit', null, 'Edit alert');
+    }
+  }
+
+  function renderAlertNotifyButton() {
+    const btn = elements.alertsNotifyBtn;
+    if (!btn) return;
+    const supported = typeof window !== 'undefined' && typeof window.Notification === 'function';
+    if (!supported) {
+      btn.classList.add('hidden');
+      return;
+    }
+    btn.classList.remove('hidden');
+    const permission = state.alerts.permission;
+    if (permission === 'granted') {
+      btn.textContent = t('alerts.enabled', null, 'Browser notifications are on');
+      btn.disabled = true;
+    } else if (permission === 'denied') {
+      btn.textContent = t('alerts.blocked', null, 'Browser notifications are blocked in this browser');
+      btn.disabled = true;
+    } else {
+      btn.textContent = t('alerts.enable', null, 'Enable browser notifications');
+      btn.disabled = false;
+    }
+  }
+
+  function readNotificationPermission() {
+    if (typeof window === 'undefined' || typeof window.Notification !== 'function') return 'unsupported';
+    return window.Notification.permission || 'default';
+  }
+
+  /** Fills the form from `state.alerts.draft`. Repaints never touch it again. */
+  function buildAlertForm() {
+    const engine = alertsEngine();
+    const draft = state.alerts.draft;
+    if (!engine || !draft) return;
+
+    if (elements.alertsCity) {
+      elements.alertsCity.innerHTML = '';
+      state.auth.favorites.forEach(function (city) {
+        const option = document.createElement('option');
+        option.value = cityKeyOf(city);
+        option.textContent = favoritesEngine().describeCity(city) || city.name;
+        elements.alertsCity.appendChild(option);
+      });
+      elements.alertsCity.value = draft.cityKey;
+    }
+
+    if (elements.alertsMetric) {
+      elements.alertsMetric.innerHTML = '';
+      engine.METRIC_IDS.forEach(function (id) {
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = metricLabel(id);
+        elements.alertsMetric.appendChild(option);
+      });
+      elements.alertsMetric.value = draft.metric;
+    }
+
+    if (elements.alertsWindow) {
+      elements.alertsWindow.innerHTML = '';
+      ALERT_WINDOW_ORDER.forEach(function (id) {
+        if (!engine.WINDOWS[id]) return;
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = windowLabel(id);
+        elements.alertsWindow.appendChild(option);
+      });
+      elements.alertsWindow.value = draft.window;
+    }
+
+    if (elements.alertsComparator) {
+      elements.alertsComparator.value = draft.comparator === 'below' ? 'below' : 'above';
+    }
+    const metric = engine.METRICS[draft.metric];
+    if (elements.alertsThreshold && metric) {
+      elements.alertsThreshold.value = String(toDisplayThreshold(metric, draft.threshold));
+    }
+    syncAlertFormRows();
+  }
+
+  /** Shows the direction/threshold rows only for a measured parameter. */
+  function syncAlertFormRows() {
+    const engine = alertsEngine();
+    const metricId = elements.alertsMetric ? elements.alertsMetric.value : '';
+    const metric = engine ? engine.METRICS[metricId] : null;
+    const isCode = !!(metric && metric.kind === 'code');
+
+    if (elements.alertsComparatorRow) elements.alertsComparatorRow.classList.toggle('hidden', isCode);
+    if (elements.alertsThresholdRow) elements.alertsThresholdRow.classList.toggle('hidden', isCode);
+    if (metric && elements.alertsThreshold) {
+      elements.alertsThreshold.min = String(metric.min);
+      elements.alertsThreshold.max = String(metric.max);
+      elements.alertsThreshold.step = String(metric.step);
+    }
+    if (metric && elements.alertsThresholdUnit) {
+      elements.alertsThresholdUnit.textContent = thresholdUnitLabel(metric);
+    }
+  }
+
+  function onAlertMetricChange() {
+    const engine = alertsEngine();
+    const metric = engine && elements.alertsMetric ? engine.METRICS[elements.alertsMetric.value] : null;
+    if (!metric) return;
+    if (metric.kind !== 'code') {
+      if (elements.alertsComparator) {
+        elements.alertsComparator.value = metric.defaultComparator === 'below' ? 'below' : 'above';
+      }
+      if (elements.alertsThreshold) {
+        elements.alertsThreshold.value = String(toDisplayThreshold(metric, metric.defaultThreshold));
+      }
+    }
+    syncAlertFormRows();
+  }
+
+  function startNewAlert() {
+    const engine = alertsEngine();
+    if (!engine) return;
+    if (!state.auth.favorites.length) {
+      setAlertStatus(t('alerts.noFavorites', null, 'Save a city to your favorites first, then you can set an alert for it.'));
+      return;
+    }
+    const metric = engine.METRICS.rainChance;
+    const city = state.auth.favorites[0];
+    state.alerts.draft = {
+      cityKey: cityKeyOf(city),
+      cityName: favoritesEngine().describeCity(city) || city.name,
+      metric: 'rainChance',
+      comparator: metric.defaultComparator,
+      threshold: metric.defaultThreshold,
+      window: 'h2',
+    };
+    state.alerts.editingId = 'new';
+    setAlertFormError('');
+    buildAlertForm();
+    renderAlertsPanel();
+    if (elements.alertsCity) elements.alertsCity.focus();
+  }
+
+  function startEditAlert(id) {
+    const engine = alertsEngine();
+    if (!engine) return;
+    const rule = state.auth.alerts.filter(function (r) { return r.id === id; })[0];
+    if (!rule) return;
+    state.alerts.draft = {
+      cityKey: rule.cityKey,
+      cityName: rule.cityName,
+      metric: rule.metric,
+      comparator: rule.comparator,
+      threshold: rule.threshold,
+      window: rule.window,
+    };
+    state.alerts.editingId = id;
+    setAlertFormError('');
+    buildAlertForm();
+    renderAlertsPanel();
+  }
+
+  function closeAlertForm() {
+    state.alerts.editingId = '';
+    state.alerts.draft = null;
+    setAlertFormError('');
+    renderAlertsPanel();
+  }
+
+  async function saveAlertForm() {
+    const engine = alertsEngine();
+    if (!engine) return;
+
+    const cityKey = elements.alertsCity ? elements.alertsCity.value : '';
+    const city = findFavoriteByKey(cityKey);
+    const metricId = elements.alertsMetric ? elements.alertsMetric.value : '';
+    const metric = engine.METRICS[metricId];
+    const windowId = elements.alertsWindow ? elements.alertsWindow.value : '';
+
+    if (!city) {
+      setAlertFormError(t('alerts.noFavorites', null, 'Save a city to your favorites first, then you can set an alert for it.'));
+      return;
+    }
+    if (!metric || !engine.WINDOWS[windowId]) {
+      setAlertFormError(t('alerts.errInvalid', null, 'That alert is not valid. Please try again.'));
+      return;
+    }
+
+    let comparator = metric.defaultComparator;
+    let threshold = 0;
+    if (metric.kind !== 'code') {
+      comparator = elements.alertsComparator ? elements.alertsComparator.value : metric.defaultComparator;
+      const entered = elements.alertsThreshold ? Number(elements.alertsThreshold.value) : NaN;
+      if (!Number.isFinite(entered)) {
+        setAlertFormError(t('alerts.errThreshold', null, 'Enter a number for the threshold.'));
+        return;
+      }
+      threshold = toCanonicalThreshold(metric, entered);
+    }
+
+    const existing = state.auth.alerts.filter(function (r) { return r.id === state.alerts.editingId; })[0] || null;
+    const rule = engine.sanitizeAlert({
+      id: existing ? existing.id : '',
+      cityKey: state.alerts.draft.cityKey,
+      cityName: favoritesEngine().describeCity(findFavoriteByKey(state.alerts.draft.cityKey)) || state.alerts.draft.cityName,
+      metric: metric.id,
+      comparator: comparator,
+      threshold: threshold,
+      window: elements.alertsWindow ? elements.alertsWindow.value : 'h2',
+      enabled: existing ? existing.enabled : true,
+      createdAt: existing ? existing.createdAt : Date.now(),
+    });
+
+    if (!rule) {
+      setAlertFormError(t('alerts.errThreshold', null, 'Enter a number for the threshold.'));
+      return;
+    }
+
+    const list = state.auth.alerts.filter(function (r) { return r.id !== rule.id; });
+    list.push(rule);
+    applyAlerts(list);
+    closeAlertForm();
+    setAlertStatus(t('alerts.added', null, 'Alert saved.'));
+    await persistAlerts();
+  }
+
+  async function persistAlerts() {
+    const token = state.auth.token;
+    const client = getFavoritesClient();
+    if (!token || !client) return;
+    try {
+      const saved = await client.saveAlerts(token, state.auth.alerts);
+      if (state.auth.token === token) {
+        const engine = alertsEngine();
+        state.auth.alerts = engine ? engine.sanitizeAlerts(saved) : state.auth.alerts;
+        renderAlertsPanel();
+      }
+    } catch (err) {
+      const engine = favoritesEngine();
+      const code = engine ? engine.apiErrorCode(err) : 'server';
+      if (code === 'unauthorized' || code === 'invalid-credentials') signOutLocally();
+      else setAlertStatus(authErrorMessage(code));
+    }
+  }
+
+  function toggleAlertRule(id) {
+    const engine = alertsEngine();
+    if (!engine || !id) return;
+    let changed = false;
+    const list = state.auth.alerts.map(function (rule) {
+      if (rule.id !== id) return rule;
+      changed = true;
+      return Object.assign({}, rule, { enabled: !rule.enabled });
+    });
+    if (!changed) return;
+    applyAlerts(list);
+    persistAlerts();
+  }
+
+  function deleteAlertRule(id) {
+    const engine = alertsEngine();
+    if (!engine || !id) return;
+    const remaining = state.auth.alerts.filter(function (rule) { return rule.id !== id; });
+    if (remaining.length === state.auth.alerts.length) return;
+    if (state.alerts.editingId === id) closeAlertForm();
+    applyAlerts(remaining);
+    setAlertStatus(t('alerts.removed', null, 'Alert removed.'));
+    persistAlerts();
+  }
+
+  /** A removed favorite takes its alert rules with it, so none is left orphaned. */
+  function removeAlertsForCity(key) {
+    const engine = alertsEngine();
+    if (!engine || !key) return;
+    const remaining = state.auth.alerts.filter(function (rule) { return rule.cityKey !== key; });
+    if (remaining.length === state.auth.alerts.length) return;
+    applyAlerts(remaining);
+    persistAlerts();
+  }
+
+  function onAlertRulesClick(event) {
+    const toggle = event.target.closest('[data-alert-toggle]');
+    if (toggle) { toggleAlertRule(toggle.dataset.alertToggle); return; }
+    const edit = event.target.closest('[data-alert-edit]');
+    if (edit) { startEditAlert(edit.dataset.alertEdit); return; }
+    const remove = event.target.closest('[data-alert-delete]');
+    if (remove) { deleteAlertRule(remove.dataset.alertDelete); return; }
+  }
+
+  async function requestNotifications() {
+    if (typeof window === 'undefined' || typeof window.Notification !== 'function') return;
+    try {
+      state.alerts.permission = await window.Notification.requestPermission();
+    } catch (err) {
+      state.alerts.permission = 'denied';
+    }
+    renderAlertNotifyButton();
+  }
+
+  function openAlertsPanel() {
+    if (!elements.alertsPanel) return;
+    closeAccountPanel(); // only one popover at a time
+    elements.alertsPanel.classList.remove('hidden');
+    if (elements.alertsBtn) elements.alertsBtn.setAttribute('aria-expanded', 'true');
+    renderAlertsPanel();
+    refreshAlerts();
+  }
+
+  function closeAlertsPanel() {
+    if (!elements.alertsPanel) return;
+    elements.alertsPanel.classList.add('hidden');
+    if (elements.alertsBtn) elements.alertsBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function isAlertsPanelOpen() {
+    return !!elements.alertsPanel && !elements.alertsPanel.classList.contains('hidden');
+  }
+
+  function initAlerts() {
+    state.alerts.permission = readNotificationPermission();
+    renderAlertsBadge();
+    renderAlertsPanel();
+    refreshAlerts();
+  }
+
 
   /**
    * The camera panel, once.
@@ -7551,14 +8369,62 @@ const icon = document.createElement('span');
         if (main && main.dataset.favoriteKey) openFavoriteCity(main.dataset.favoriteKey);
       });
     }
-    // Escape closes the panel, and so does a click anywhere outside it.
+
+    // --- Weather alerts --------------------------------------------------
+    if (elements.alertsBtn) {
+      elements.alertsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (isAlertsPanelOpen()) closeAlertsPanel();
+        else openAlertsPanel();
+      });
+    }
+    if (elements.alertsCloseBtn) {
+      elements.alertsCloseBtn.addEventListener('click', closeAlertsPanel);
+    }
+    if (elements.alertsAddBtn) {
+      elements.alertsAddBtn.addEventListener('click', startNewAlert);
+    }
+    if (elements.alertsCancelBtn) {
+      elements.alertsCancelBtn.addEventListener('click', closeAlertForm);
+    }
+    if (elements.alertsRefreshBtn) {
+      elements.alertsRefreshBtn.addEventListener('click', () => checkAlerts({ announce: true }));
+    }
+    if (elements.alertsNotifyBtn) {
+      elements.alertsNotifyBtn.addEventListener('click', requestNotifications);
+    }
+    if (elements.alertsMetric) {
+      elements.alertsMetric.addEventListener('change', onAlertMetricChange);
+    }
+    if (elements.alertsForm) {
+      elements.alertsForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        saveAlertForm();
+      });
+    }
+    if (elements.alertsRulesList) {
+      elements.alertsRulesList.addEventListener('click', onAlertRulesClick);
+    }
+
+    // Escape closes whichever popover is open, and so does a click outside it.
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && isAccountPanelOpen()) {
+      if (e.key !== 'Escape') return;
+      if (isAlertsPanelOpen()) {
+        closeAlertsPanel();
+        if (elements.alertsBtn) elements.alertsBtn.focus();
+        return;
+      }
+      if (isAccountPanelOpen()) {
         closeAccountPanel();
         if (elements.accountBtn) elements.accountBtn.focus();
       }
     });
     document.addEventListener('click', (e) => {
+      if (isAlertsPanelOpen()
+        && !(elements.alertsPanel && elements.alertsPanel.contains(e.target))
+        && !(elements.alertsBtn && elements.alertsBtn.contains(e.target))) {
+        closeAlertsPanel();
+      }
       if (!isAccountPanelOpen()) return;
       if (elements.accountPanel && elements.accountPanel.contains(e.target)) return;
       if (elements.accountBtn && elements.accountBtn.contains(e.target)) return;
@@ -8079,6 +8945,10 @@ const toCompare = state.searchMode === 'compare';
         renderAccountUI();
         renderFavoritesBar();
         updateFavoriteButton();
+        // The alerts bell, its badge and the panel are all translated too, and
+        // the summary lines are composed from the rules in memory.
+        renderAlertsBadge();
+        renderAlertsPanel();
         // The camera panel's own strings (live badge, pause control, distance,
         // the "no camera" line) are all language-bound, and the results render
         // above already repaints each panel from its cached answer.
@@ -8118,6 +8988,11 @@ const toCompare = state.searchMode === 'compare';
     // Restore the account session (if any) and paint the account surfaces
     // before any weather arrives, so the header is honest from the first frame.
     initAuth();
+
+    // Paint the alert bell from the same first frame: an empty bell when signed
+    // out, and the current verdicts once applyAlerts() lands a session.
+    initAlerts();
+
 
     // Boot the shared ticker and the visitor's reference clock before any data
     // arrives, so there is a clock on screen from the first paint.

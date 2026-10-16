@@ -19,6 +19,8 @@
  *       GET  /api/auth/me                               -> { user, favorites }
  *       GET  /api/favorites                             -> { favorites }
  *       PUT  /api/favorites      { favorites: [...] }   -> { favorites }
+ *       GET  /api/alerts                                -> { alerts }
+ *       PUT  /api/alerts         { alerts: [...] }      -> { alerts }
  *
  * Security, in the order it matters:
  *
@@ -53,6 +55,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const Favorites = require('./favorites.js');
+const Alerts = require('./alerts.js');
 
 // ==========================================================================
 // Constants
@@ -204,6 +207,7 @@ function createStore(dataDir, log) {
       hash: hash,
       createdAt: Date.now(),
       favorites: [],
+      alerts: [],
     };
     store.users[key] = record;
     await persist();
@@ -216,7 +220,13 @@ function createStore(dataDir, log) {
     return record.favorites;
   }
 
-  return { find: find, create: create, setFavorites: setFavorites, persist: persist };
+  async function setAlerts(record, alerts) {
+    record.alerts = alerts;
+    await persist();
+    return record.alerts;
+  }
+
+  return { find: find, create: create, setFavorites: setFavorites, setAlerts: setAlerts, persist: persist };
 }
 
 // ==========================================================================
@@ -450,7 +460,7 @@ function createApiHandler(config) {
     const method = req.method || 'GET';
 
     if (urlPath === '/api/health' && method === 'GET') {
-      sendJson(res, 200, { ok: true, service: 'weatherscope', favorites: Favorites.MAX_FAVORITES });
+      sendJson(res, 200, { ok: true, service: 'weatherscope', favorites: Favorites.MAX_FAVORITES, alerts: Alerts.MAX_ALERTS });
       return true;
     }
 
@@ -492,6 +502,7 @@ function createApiHandler(config) {
         token: token,
         user: publicUser(record),
         favorites: Favorites.sanitizeFavorites(record.favorites),
+        alerts: Alerts.sanitizeAlerts(record.alerts),
       });
       return true;
     }
@@ -536,6 +547,7 @@ function createApiHandler(config) {
         token: token,
         user: publicUser(record),
         favorites: Favorites.sanitizeFavorites(record.favorites),
+        alerts: Alerts.sanitizeAlerts(record.alerts),
       });
       return true;
     }
@@ -551,8 +563,8 @@ function createApiHandler(config) {
       return true;
     }
 
-    // --- Identity + favorites require a live session -----------------------
-    if (urlPath === '/api/auth/me' || urlPath === '/api/favorites') {
+    // --- Identity, favorites and alerts require a live session -------------
+    if (urlPath === '/api/auth/me' || urlPath === '/api/favorites' || urlPath === '/api/alerts') {
       const auth = authenticate(req);
 
       if (urlPath === '/api/auth/me') {
@@ -568,17 +580,25 @@ function createApiHandler(config) {
           ok: true,
           user: publicUser(auth.record),
           favorites: Favorites.sanitizeFavorites(auth.record.favorites),
+          alerts: Alerts.sanitizeAlerts(auth.record.alerts),
         });
         return true;
       }
 
-      // /api/favorites
+      // /api/favorites and /api/alerts are the same shape: a whole collection
+      // the client replaces in one PUT, validated by its own engine.
+      const collection = urlPath === '/api/alerts' ? 'alerts' : 'favorites';
+      const sanitize = urlPath === '/api/alerts' ? Alerts.sanitizeAlerts : Favorites.sanitizeFavorites;
+      const save = urlPath === '/api/alerts' ? store.setAlerts : store.setFavorites;
+
       if (method === 'GET') {
         if (!auth) {
           sendJson(res, 401, { ok: false, code: 'unauthorized' });
           return true;
         }
-        sendJson(res, 200, { ok: true, favorites: Favorites.sanitizeFavorites(auth.record.favorites) });
+        const payload = { ok: true };
+        payload[collection] = sanitize(auth.record[collection]);
+        sendJson(res, 200, payload);
         return true;
       }
 
@@ -594,12 +614,14 @@ function createApiHandler(config) {
           sendJson(res, 400, { ok: false, code: 'invalid' });
           return true;
         }
-        if (!Array.isArray(body.favorites)) {
+        if (!Array.isArray(body[collection])) {
           sendJson(res, 400, { ok: false, code: 'invalid' });
           return true;
         }
-        const saved = await store.setFavorites(auth.record, Favorites.sanitizeFavorites(body.favorites));
-        sendJson(res, 200, { ok: true, favorites: saved });
+        const saved = await save(auth.record, sanitize(body[collection]));
+        const payload = { ok: true };
+        payload[collection] = saved;
+        sendJson(res, 200, payload);
         return true;
       }
 

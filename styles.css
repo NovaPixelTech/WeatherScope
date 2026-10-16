@@ -1754,6 +1754,268 @@ body {
   fill: currentColor;
 }
 
+/* ==========================================================================
+   Weather alerts
+   --------------------------------------------------------------------------
+   A bell beside the account control, a badge counting the rules that match
+   right now, and the panel that lists them and edits the rules. The panel
+   reuses the account panel's anchored-popover pattern.
+   ========================================================================== */
+.alerts-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(11, 19, 36, 0.85);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.alerts-btn:hover {
+  background: rgba(24, 40, 74, 0.9);
+  color: var(--text-primary);
+}
+
+.alerts-btn:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+/* Matches the favorite star: lit while something is actually matching. */
+.alerts-btn.has-alerts {
+  color: var(--accent-yellow);
+  border-color: rgba(250, 204, 21, 0.55);
+}
+
+.alerts-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: var(--accent-yellow);
+  color: #1a1a1a;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+}
+
+.alerts-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(340px, calc(100vw - 24px));
+  max-height: min(72vh, 620px);
+  overflow-y: auto;
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(9, 15, 30, 0.98);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+  z-index: 60;
+}
+
+.alerts-section-title {
+  margin: 14px 0 8px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.alerts-empty {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.alerts-status {
+  min-height: 1em;
+  margin: 4px 0;
+  color: var(--accent-cyan);
+  font-size: 0.76rem;
+}
+
+.alerts-active-list,
+.alerts-rules-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.alert-active-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent-yellow);
+  background: rgba(250, 204, 21, 0.1);
+}
+
+.alert-active-city {
+  color: var(--text-primary);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.alert-active-detail {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.alerts-toolbar {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.alerts-toolbar .btn {
+  flex: 1;
+}
+
+.alerts-notify-btn,
+.alerts-submit-btn {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.alerts-form {
+  margin: 10px 0;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.alerts-threshold-row {
+  display: flex;
+  gap: 8px;
+}
+
+.alerts-threshold-row .account-field {
+  flex: 1;
+}
+
+.alerts-threshold-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.alerts-threshold-input input {
+  flex: 1;
+}
+
+.alerts-threshold-unit {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.alerts-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.alerts-form-actions .btn {
+  flex: 1;
+}
+
+.alert-rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.alert-rule.is-paused {
+  opacity: 0.55;
+}
+
+.alert-rule-toggle {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.68rem;
+}
+
+.alert-rule-toggle:focus-visible,
+.alert-rule-action:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.alert-rule-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.alert-rule-city {
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alert-rule-summary {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+}
+
+.alert-rule-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.alert-rule-action {
+  padding: 4px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.alert-rule-action:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.alert-rule-delete:hover {
+  color: var(--accent-rose);
+}
+
 /* Empty state within climate results */
 .climate-empty-state {
   grid-column: 1 / -1;
